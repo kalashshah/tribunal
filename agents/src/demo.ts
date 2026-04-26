@@ -26,7 +26,7 @@ import { ethers, JsonRpcProvider, Wallet } from "ethers";
 
 import { createInMemoryBus } from "./transport/in-memory.js";
 import { createAxlClient, subscribe, type AxlClient } from "./transport/axl.js";
-import { createCannedLlm, defaultDemoScripts } from "./llm/canned.js";
+import { pickLlmFromEnv } from "./llm/index.js";
 import { createTribunalClient } from "./chain/tribunal-client.js";
 import { createClerk } from "./roles/clerk.js";
 import { createLawyer } from "./roles/lawyer.js";
@@ -174,7 +174,9 @@ async function main() {
     judgeAxl   = bus.newClient("JUDGE");
     clerkPeer  = "CLERK";
   }
-  const llm = createCannedLlm(defaultDemoScripts());
+  const picked = pickLlmFromEnv();
+  log("llm", `using ${picked.provider} (${picked.model})`);
+  const llm = picked.llm;
   const storage = inMemoryStorage();
 
   const tribunal = createTribunalClient({

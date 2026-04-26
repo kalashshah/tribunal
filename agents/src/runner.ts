@@ -34,7 +34,7 @@ import { fileURLToPath } from "node:url";
 import { ethers, JsonRpcProvider, Wallet } from "ethers";
 
 import { createAxlClient, subscribe, AxlClient } from "./transport/axl.js";
-import { createLlm } from "./llm/client.js";
+import { pickLlmFromEnv } from "./llm/index.js";
 import { createTribunalClient } from "./chain/tribunal-client.js";
 import { createClerk } from "./roles/clerk.js";
 import { createLawyer } from "./roles/lawyer.js";
@@ -107,10 +107,9 @@ async function main() {
     verdictLog:   verdictLog   as any,
   });
 
-  const llm = createLlm({
-    apiKey: envOrThrow("ANTHROPIC_API_KEY"),
-    model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6",
-  });
+  const picked = pickLlmFromEnv();
+  console.log(`LLM: ${picked.provider} (${picked.model})`);
+  const llm = picked.llm;
 
   // AXL — four nodes on consecutive ports. Override via env if your config
   // differs; defaults match the docs/protocols/axl-spike-notes.md layout.
