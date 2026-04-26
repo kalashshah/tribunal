@@ -16,8 +16,8 @@ const config: HardhatUserConfig = {
     ogTestnet: {
       url: process.env.OG_RPC_URL ?? "https://evmrpc-testnet.0g.ai",
       accounts: process.env.OG_PRIVATE_KEY ? [process.env.OG_PRIVATE_KEY] : [],
-      // 0G Galileo testnet chainId — verify against docs.0g.ai at deploy time
-      chainId: 16601,
+      // 0G Galileo testnet — verified at deploy time against the live RPC.
+      chainId: 16602,
     },
   },
 };

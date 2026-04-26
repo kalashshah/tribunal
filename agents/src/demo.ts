@@ -93,10 +93,25 @@ async function main() {
     "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a", // 4 - lawyer A
     "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba", // 5 - lawyer B
   ];
-  const operator   = new Wallet(ACCOUNTS[0]!, provider);
+  // For 0G testnet (or any chain other than the local hardhat network) we
+  // need the operator to fund the role wallets first — they're hardhat
+  // dev keys and have no balance off-chain.
+  const operator: Wallet = process.env.OG_PRIVATE_KEY && (await provider.getNetwork()).chainId !== 31337n
+    ? new Wallet(process.env.OG_PRIVATE_KEY, provider)
+    : new Wallet(ACCOUNTS[0]!, provider);
   const accuser    = new Wallet(ACCOUNTS[1]!, provider);
   const defendant  = new Wallet(ACCOUNTS[2]!, provider);
   const judgeOwner = new Wallet(ACCOUNTS[3]!, provider);
+
+  const TOP_UP = ethers.parseEther("0.05");
+  for (const w of [accuser, defendant, judgeOwner]) {
+    const bal = await provider.getBalance(w.address);
+    if (bal < TOP_UP / 2n) {
+      log("fund", `topping up ${w.address} from ${operator.address}`);
+      const tx = await operator.sendTransaction({ to: w.address, value: TOP_UP });
+      await tx.wait();
+    }
+  }
 
   const registry = new ethers.Contract(dep.AgentRegistry, loadAbi("AgentRegistry"), operator);
   const tribunalCore = new ethers.Contract(dep.TribunalCore, loadAbi("TribunalCore"), operator);
