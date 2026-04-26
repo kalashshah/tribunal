@@ -51,22 +51,88 @@ export interface PublishArgs {
 }
 
 export async function publishAgentEnsRecords(args: PublishArgs): Promise<string> {
-  const { createWalletClient, http } = await import("viem");
+  const {
+    createWalletClient,
+    createPublicClient,
+    http,
+    namehash,
+    keccak256,
+    toHex,
+    stringToBytes,
+  } = await import("viem");
   const { privateKeyToAccount } = await import("viem/accounts");
   const { sepolia } = await import("viem/chains");
-  const { addEnsContracts } = await import("@ensdomains/ensjs");
-  const { setRecords } = await import("@ensdomains/ensjs/wallet");
 
   const account = privateKeyToAccount(args.privateKey);
-  const client = createWalletClient({
-    chain: addEnsContracts(sepolia),
-    transport: http(args.rpcUrl),
-    account,
-  });
+  const wallet = createWalletClient({ chain: sepolia, transport: http(args.rpcUrl), account });
+  const reader = createPublicClient({ chain: sepolia, transport: http(args.rpcUrl) });
+
   const fullName = `${args.label}.${args.parentName}`;
-  await setRecords(client as any, {
-    name: fullName,
-    texts: Object.entries(args.records).map(([key, value]) => ({ key, value })),
-  } as any);
+  const labelHash = keccak256(stringToBytes(args.label));
+  const parentNode = namehash(args.parentName);
+  const subNode = namehash(fullName);
+
+  // ENS Registry canonical address (same on all chains).
+  const ENS_REGISTRY = "0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e" as const;
+  const REGISTRY_ABI = [
+    { name: "resolver", type: "function", stateMutability: "view",
+      inputs: [{ type: "bytes32" }], outputs: [{ type: "address" }] },
+    { name: "owner", type: "function", stateMutability: "view",
+      inputs: [{ type: "bytes32" }], outputs: [{ type: "address" }] },
+    { name: "setSubnodeRecord", type: "function", stateMutability: "nonpayable",
+      inputs: [
+        { type: "bytes32", name: "node" },
+        { type: "bytes32", name: "label" },
+        { type: "address", name: "owner" },
+        { type: "address", name: "resolver" },
+        { type: "uint64",  name: "ttl" },
+      ], outputs: [] },
+  ] as const;
+  const RESOLVER_ABI = [
+    { name: "setText", type: "function", stateMutability: "nonpayable",
+      inputs: [
+        { type: "bytes32", name: "node" },
+        { type: "string",  name: "key" },
+        { type: "string",  name: "value" },
+      ], outputs: [] },
+  ] as const;
+
+  const parentResolver = await reader.readContract({
+    address: ENS_REGISTRY, abi: REGISTRY_ABI, functionName: "resolver", args: [parentNode],
+  });
+  if (parentResolver === "0x0000000000000000000000000000000000000000") {
+    throw new Error(`Parent ${args.parentName} has no resolver. Set one on the parent first.`);
+  }
+
+  // Create or reuse the subname.
+  const currentResolver = await reader.readContract({
+    address: ENS_REGISTRY, abi: REGISTRY_ABI, functionName: "resolver", args: [subNode],
+  });
+  if (currentResolver === "0x0000000000000000000000000000000000000000") {
+    const txHash = await wallet.writeContract({
+      address: ENS_REGISTRY,
+      abi: REGISTRY_ABI,
+      functionName: "setSubnodeRecord",
+      args: [parentNode, labelHash, account.address, parentResolver, 0n],
+    });
+    await reader.waitForTransactionReceipt({ hash: txHash });
+  }
+
+  // Set each text record. One tx per record keeps each call simple and
+  // sidesteps ENSjs multicall quirks against legacy resolvers.
+  const resolver = (currentResolver === "0x0000000000000000000000000000000000000000")
+    ? parentResolver
+    : currentResolver;
+  for (const [key, value] of Object.entries(args.records)) {
+    const txHash = await wallet.writeContract({
+      address: resolver,
+      abi: RESOLVER_ABI,
+      functionName: "setText",
+      args: [subNode, key, value],
+    });
+    await reader.waitForTransactionReceipt({ hash: txHash });
+  }
+  // Silence unused-import warning when keccak256/toHex aren't reached above.
+  void toHex;
   return fullName;
 }

@@ -1,31 +1,39 @@
 /**
- * Publish ENSIP-25 + agent text records for every Tribunal agent on Sepolia.
- * Run after the contracts are deployed and after the agents are registered.
+ * Publish ENSIP-25 + agent text records on Sepolia for every Tribunal
+ * agent that's been registered on the 0G testnet AgentRegistry.
  *
- * Required env:
- *   ENS_RPC_URL, ENS_PRIVATE_KEY, ENS_PARENT_NAME (e.g. "tribunal.eth")
- *   AGENT_REGISTRY_ADDR     — chain address of AgentRegistry on 0G testnet
- *   AGENT_REGISTRY_CHAIN_ID — defaults to 16601 (0G testnet)
- *   <LABEL>_AGENT_ID, <LABEL>_AXL_PEER_ID, <LABEL>_PUBKEY for each subname
+ * Reads the registry on-chain to find every agent (id 1..nextId-1), pulls
+ * the AXL peer id from the running clerk/lawyer/judge nodes when an
+ * obvious ENS-name → port mapping applies, and writes:
  *
- * Run with tsx: `npx tsx scripts/publish-ens-records.ts`
+ *   verified-agent:eip155:<chainId>:<registryAddr>:<id>  =  "1"
+ *   agent.role                                           =  judge | litigant | ...
+ *   agent.axl-peer-id                                    =  <hex64>     (when known)
+ *   agent.pubkey                                         =  <addr hex>  (registry owner)
+ *   agent.credentials                                    =  comma list  (judge only)
+ *
+ * Required env (from repo .env):
+ *   OG_RPC_URL                     0G testnet RPC
+ *   ENS_RPC_URL                    Sepolia RPC for ENS writes
+ *   ENS_PRIVATE_KEY                Signer that owns the parent ENS name
+ *   ENS_PARENT_NAME                e.g. "tribunal.eth"
+ *
+ * Run:
+ *   npx tsx scripts/publish-ens-records.ts
  */
 
 import "dotenv/config";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { ethers } from "ethers";
 import {
   agentEnsRecord,
   publishAgentEnsRecords,
   type AgentRole,
 } from "../agents/src/identity/ens.js";
 
-interface SeedEntry {
-  label: string;
-  agentId: string;
-  role: AgentRole;
-  axlPeerId: string;
-  pubKey: string;
-  credentials?: string[];
-}
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function envOrThrow(key: string): string {
   const v = process.env[key];
@@ -33,59 +41,104 @@ function envOrThrow(key: string): string {
   return v;
 }
 
+interface DeploymentJson {
+  network: string;
+  AgentRegistry: string;
+}
+
+interface OnchainAgent {
+  id: bigint;
+  owner: string;
+  ensName: string;
+  role: string;
+}
+
+const REGISTRY_ABI = [
+  "function nextId() view returns (uint256)",
+  "function agents(uint256) view returns (address owner, string ensName, string role, bool active)",
+];
+
+/// Best-effort mapping from agent ENS name → AXL API port. Lets the script
+/// publish each agent's peer id without us having to type it in.
+const AXL_PORT_BY_LABEL: Record<string, number> = {
+  "judge-athena": 9032,
+  "lawyer-quinn": 9012,
+  "lawyer-rivers": 9022,
+};
+
+async function fetchPeerIdFromPort(port: number): Promise<string | undefined> {
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/topology`, { signal: AbortSignal.timeout(2000) });
+    if (!r.ok) return undefined;
+    const body = (await r.json()) as { our_public_key: string };
+    return body.our_public_key;
+  } catch {
+    return undefined;
+  }
+}
+
 async function main() {
-  const rpcUrl = envOrThrow("ENS_RPC_URL");
-  const privateKey = envOrThrow("ENS_PRIVATE_KEY") as `0x${string}`;
-  const parentName = envOrThrow("ENS_PARENT_NAME");
-  const chainId = process.env.AGENT_REGISTRY_CHAIN_ID ?? "16601";
-  const registryAddr = envOrThrow("AGENT_REGISTRY_ADDR");
-  const interopAddr = `eip155:${chainId}:${registryAddr}`;
+  const ogRpcUrl  = envOrThrow("OG_RPC_URL");
+  const ensRpcUrl = envOrThrow("ENS_RPC_URL");
+  const rawEnsPk = envOrThrow("ENS_PRIVATE_KEY");
+  const ensPk = (rawEnsPk.startsWith("0x") ? rawEnsPk : `0x${rawEnsPk}`) as `0x${string}`;
+  const parent    = envOrThrow("ENS_PARENT_NAME");
 
-  // Seed list — extend as you register more agents.
-  const seed: SeedEntry[] = [
-    {
-      label: "judge-athena",
-      agentId: process.env.JUDGE_ATHENA_AGENT_ID ?? "3",
-      role: "judge",
-      axlPeerId: envOrThrow("JUDGE_ATHENA_AXL_PEER_ID"),
-      pubKey: process.env.JUDGE_ATHENA_PUBKEY ?? "0x",
-      credentials: ["bar:0g-bar-association", "specialty:textualism"],
-    },
-    {
-      label: "lawyer-quinn",
-      agentId: process.env.LAWYER_QUINN_AGENT_ID ?? "6",
-      role: "lawyer",
-      axlPeerId: envOrThrow("LAWYER_QUINN_AXL_PEER_ID"),
-      pubKey: process.env.LAWYER_QUINN_PUBKEY ?? "0x",
-      credentials: ["bar:0g-bar-association"],
-    },
-    {
-      label: "lawyer-rivers",
-      agentId: process.env.LAWYER_RIVERS_AGENT_ID ?? "7",
-      role: "lawyer",
-      axlPeerId: envOrThrow("LAWYER_RIVERS_AXL_PEER_ID"),
-      pubKey: process.env.LAWYER_RIVERS_PUBKEY ?? "0x",
-      credentials: ["bar:0g-bar-association"],
-    },
-  ];
+  // Load deployment to know the registry address + chainId.
+  const dep = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, "../docs/deployment.json"), "utf8"),
+  ) as DeploymentJson;
+  const interopAddr = `eip155:${dep.network}:${dep.AgentRegistry}`;
 
-  for (const entry of seed) {
+  // Read all registered agents.
+  const provider = new ethers.JsonRpcProvider(ogRpcUrl);
+  const reg = new ethers.Contract(dep.AgentRegistry, REGISTRY_ABI, provider);
+  const next = Number(await reg.nextId());
+
+  const agents: OnchainAgent[] = [];
+  for (let i = 1; i < next; i++) {
+    const a = await reg.agents(BigInt(i));
+    agents.push({ id: BigInt(i), owner: a.owner, ensName: a.ensName, role: a.role });
+  }
+  if (agents.length === 0) {
+    console.log("No agents registered on-chain yet. Run the demo first.");
+    return;
+  }
+  console.log(`Found ${agents.length} agent(s) on AgentRegistry:`);
+  for (const a of agents) console.log(`  #${a.id} ${a.ensName.padEnd(36)} ${a.role.padEnd(10)} owner=${a.owner}`);
+
+  for (const a of agents) {
+    // Derive label (e.g. "alice" from "alice.tribunal.eth"); skip if the
+    // ENS name doesn't end in our parent.
+    if (!a.ensName.endsWith(`.${parent}`)) {
+      console.log(`Skipping ${a.ensName}: not under .${parent}`);
+      continue;
+    }
+    const label = a.ensName.slice(0, -(parent.length + 1));
+    const port = AXL_PORT_BY_LABEL[label];
+    const axlPeerId = port ? await fetchPeerIdFromPort(port) : undefined;
+    if (port && !axlPeerId) {
+      console.log(`Note: ${label} maps to port ${port} but AXL not reachable; publishing without peer id.`);
+    }
+
+    const credentials = a.role === "judge" ? ["bar:0g-bar-association", "specialty:textualism"] : [];
+
     const records = agentEnsRecord({
       registryInteropAddress: interopAddr,
-      agentId: entry.agentId,
-      role: entry.role,
-      axlPeerId: entry.axlPeerId,
-      pubKey: entry.pubKey,
-      credentials: entry.credentials,
+      agentId: a.id.toString(),
+      role: a.role as AgentRole,
+      axlPeerId: axlPeerId ?? "",
+      pubKey: a.owner, // for the hackathon, store the registry owner address as the pubkey
+      credentials,
     });
     const fullName = await publishAgentEnsRecords({
-      rpcUrl,
-      privateKey,
-      parentName,
-      label: entry.label,
+      rpcUrl: ensRpcUrl,
+      privateKey: ensPk,
+      parentName: parent,
+      label,
       records,
     });
-    console.log(`Published records for ${fullName}`);
+    console.log(`Published records for ${fullName} (agent #${a.id})`);
   }
 }
 
