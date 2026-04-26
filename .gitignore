@@ -9,3 +9,8 @@ typechain-types/
 coverage/
 *.log
 .DS_Store
+
+# editor / runtime
+.claude/
+*.log
+.cases-queue.json

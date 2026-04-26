@@ -7,10 +7,16 @@
 
 Hackathon project for **ETHGlobal Open Agents (April 2026)**.
 
+```bash
+npm install && npm run demo
+```
+
+That runs a full case end-to-end on a local hardhat node — boots the chain, deploys all five contracts, mints a judge iNFT, files a dispute, runs the trial (mocked LLM, in-memory AXL bus, in-memory 0G Storage), and asserts the on-chain state. **No external services or API keys required.**
+
 - **Spec:** [`docs/superpowers/specs/2026-04-26-tribunal-design.md`](docs/superpowers/specs/2026-04-26-tribunal-design.md)
 - **Implementation plan:** [`docs/superpowers/plans/2026-04-26-tribunal.md`](docs/superpowers/plans/2026-04-26-tribunal.md)
 - **Architecture diagram:** [`docs/architecture.md`](docs/architecture.md)
-- **Demo script:** [`docs/demo-script.md`](docs/demo-script.md)
+- **Demo video script:** [`docs/demo-script.md`](docs/demo-script.md)
 
 ## Sponsor tracks targeted
 
@@ -84,8 +90,9 @@ npm run dev
 ## Tests
 
 ```
-contracts: 25/25
-agents:    40/40
+contracts: 25/25     (hardhat)
+agents:    48/48     (vitest)
+demo:      5/5       (end-to-end against local hardhat)
 ```
 
 ## Acknowledgements

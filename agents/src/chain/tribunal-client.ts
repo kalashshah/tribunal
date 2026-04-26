@@ -14,6 +14,11 @@ export interface TribunalContracts {
       opinionHash: `0x${string}`,
     ) => Promise<TxLike>;
     markSettled: (caseId: bigint) => Promise<TxLike>;
+    finalizeVerdict: (
+      caseId: bigint,
+      verdictLog: string,
+      opinionRoot: `0x${string}`,
+    ) => Promise<TxLike>;
   };
   judgeINFT: {
     appendRulingMemory: (tokenId: bigint, caseRulingHash: `0x${string}`) => Promise<TxLike>;
@@ -37,6 +42,11 @@ export interface TribunalClient {
   ): Promise<void>;
   appendJudgeMemory(judgeTokenId: bigint, caseRulingHash: `0x${string}`): Promise<void>;
   markSettled(caseId: bigint): Promise<void>;
+  finalizeVerdict(
+    caseId: bigint,
+    verdictLogAddress: string,
+    opinionRoot: `0x${string}`,
+  ): Promise<void>;
   postVerdict?(
     caseId: bigint,
     prevailingIsAccuser: boolean,
@@ -64,6 +74,10 @@ export function createTribunalClient(deps: TribunalContracts): TribunalClient {
     },
     async markSettled(caseId) {
       const tx = await deps.tribunalCore.markSettled(caseId);
+      await tx.wait();
+    },
+    async finalizeVerdict(caseId, verdictLogAddress, opinionRoot) {
+      const tx = await deps.tribunalCore.finalizeVerdict(caseId, verdictLogAddress, opinionRoot);
       await tx.wait();
     },
     postVerdict: deps.verdictLog

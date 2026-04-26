@@ -11,6 +11,10 @@ interface IEscrow {
     function flagDisputed(uint256 id) external;
 }
 
+interface IVerdictLog {
+    function post(uint256 caseId, bool prevailingIsAccuser, bytes32 opinionRoot) external;
+}
+
 /// @title TribunalCore
 /// @notice Case state machine for AI-agent dispute resolution. Holds anchor
 ///         hashes of every event in a case and tallies multi-judge rulings.
@@ -108,6 +112,16 @@ contract TribunalCore is ITribunal {
     function markSettled(uint256 id) external onlyRunner {
         Case storage c = cases[id];
         require(c.status == CaseStatus.Ruled, "not ruled");
+        c.status = CaseStatus.Settled;
+    }
+
+    /// Convenience: post the verdict to VerdictLog and mark the case
+    /// settled in one tx. Lets the runner finalise without VerdictLog
+    /// trusting the runner directly.
+    function finalizeVerdict(uint256 id, address verdictLog, bytes32 opinionRoot) external onlyRunner {
+        Case storage c = cases[id];
+        require(c.status == CaseStatus.Ruled, "not ruled");
+        IVerdictLog(verdictLog).post(id, c.prevailingIsAccuser, opinionRoot);
         c.status = CaseStatus.Settled;
     }
 
