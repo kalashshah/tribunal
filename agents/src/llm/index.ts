@@ -4,7 +4,7 @@
 
 import type { Llm } from "./client.js";
 import { createLlm } from "./client.js";
-import { createOpenRouterLlm } from "./openrouter.js";
+import { createOpenRouterLlm, DEFAULT_FREE_FALLBACKS } from "./openrouter.js";
 import { createCannedLlm, defaultDemoScripts } from "./canned.js";
 
 export interface PickLlmResult {
@@ -15,11 +15,15 @@ export interface PickLlmResult {
 
 export function pickLlmFromEnv(): PickLlmResult {
   if (process.env.OPENROUTER_API_KEY) {
-    const model = process.env.OPENROUTER_MODEL ?? "meta-llama/llama-3.3-70b-instruct:free";
+    const model = process.env.OPENROUTER_MODEL ?? "openai/gpt-oss-20b:free";
+    // Build the fallback chain: the configured model first, then the
+    // defaults (de-duped so we don't try the configured model twice).
+    const fallbackModels = DEFAULT_FREE_FALLBACKS.filter((m) => m !== model);
     return {
       llm: createOpenRouterLlm({
         apiKey: process.env.OPENROUTER_API_KEY,
         model,
+        fallbackModels,
         appUrl: "https://github.com/kalashshah/tribunal",
         appTitle: "Tribunal",
       }),

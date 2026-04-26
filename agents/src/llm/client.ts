@@ -6,6 +6,10 @@ export interface CompleteArgs {
   system: string;
   messages: LlmMessage[];
   maxTokens?: number;
+  /// When "json", requests strict JSON output from the provider where
+  /// supported (OpenRouter forwards via response_format). Caller is still
+  /// responsible for parsing — providers can ignore the hint.
+  responseFormat?: "json";
 }
 
 export interface CompleteResult {

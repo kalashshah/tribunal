@@ -27,11 +27,13 @@
  *   cd agents && npm run build && node dist/runner.js
  */
 
-import "dotenv/config";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as dotenv from "dotenv";
 import { ethers, JsonRpcProvider, Wallet } from "ethers";
+
+dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.env") });
 
 import { createAxlClient, subscribe, AxlClient } from "./transport/axl.js";
 import { pickLlmFromEnv } from "./llm/index.js";

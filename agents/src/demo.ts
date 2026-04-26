@@ -22,7 +22,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as dotenv from "dotenv";
 import { ethers, JsonRpcProvider, Wallet } from "ethers";
+
+// Load .env from the repo root regardless of cwd.
+dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.env") });
 
 import { createInMemoryBus } from "./transport/in-memory.js";
 import { createAxlClient, subscribe, type AxlClient } from "./transport/axl.js";
