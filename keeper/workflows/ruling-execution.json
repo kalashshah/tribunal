@@ -1,0 +1,71 @@
+{
+  "name": "tribunal-ruling-execution",
+  "description": "When VerdictLog.VerdictPosted fires for a Tribunal case, look up the case's escrow + prevailing party, release the escrow, mark the case settled, and notify both parties.",
+  "version": 1,
+  "triggers": [
+    {
+      "type": "event",
+      "chain": "0g-testnet",
+      "address": "{{ deployment.VerdictLog }}",
+      "event": "VerdictPosted(uint256 indexed caseId, bool prevailingIsAccuser, bytes32 opinionRoot)"
+    }
+  ],
+  "steps": [
+    {
+      "id": "load-escrow",
+      "type": "view",
+      "address": "{{ deployment.TribunalCore }}",
+      "method": "caseEscrow",
+      "args": ["{{ trigger.caseId }}"],
+      "out": ["escrowAdapter", "escrowId"]
+    },
+    {
+      "id": "load-accuser",
+      "type": "view",
+      "address": "{{ deployment.TribunalCore }}",
+      "method": "caseAccuser",
+      "args": ["{{ trigger.caseId }}"],
+      "out": "accuserAgentId"
+    },
+    {
+      "id": "load-defendant",
+      "type": "view",
+      "address": "{{ deployment.TribunalCore }}",
+      "method": "caseDefendant",
+      "args": ["{{ trigger.caseId }}"],
+      "out": "defendantAgentId"
+    },
+    {
+      "id": "load-prevailing-agent",
+      "type": "view",
+      "address": "{{ deployment.AgentRegistry }}",
+      "method": "agents",
+      "args": ["{{ trigger.prevailingIsAccuser ? steps.load-accuser.out : steps.load-defendant.out }}"],
+      "out": ["prevailingOwner", "prevailingEns", "prevailingRole", "prevailingActive"]
+    },
+    {
+      "id": "release-escrow",
+      "type": "tx",
+      "if": "steps.load-escrow.escrowAdapter != '0x0000000000000000000000000000000000000000'",
+      "address": "{{ deployment.EscrowAdapter }}",
+      "method": "release",
+      "args": [
+        "{{ steps.load-escrow.escrowId }}",
+        "{{ steps.load-prevailing-agent.prevailingOwner }}"
+      ]
+    },
+    {
+      "id": "mark-settled",
+      "type": "tx",
+      "address": "{{ deployment.TribunalCore }}",
+      "method": "markSettled",
+      "args": ["{{ trigger.caseId }}"]
+    },
+    {
+      "id": "notify",
+      "type": "discord",
+      "channel": "{{ env.DISCORD_CHANNEL }}",
+      "message": "Tribunal verdict on case #{{ trigger.caseId }}: prevailing = {{ trigger.prevailingIsAccuser ? 'accuser' : 'defendant' }} ({{ steps.load-prevailing-agent.prevailingEns }}). Escrow released, case settled."
+    }
+  ]
+}

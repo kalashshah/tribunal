@@ -1,0 +1,45 @@
+{
+  "name": "tribunal-deadline-default",
+  "description": "Periodically scan TribunalCore for cases stuck in the Filed status for too long and ping operations.",
+  "version": 1,
+  "triggers": [
+    { "type": "schedule", "cron": "*/10 * * * *" }
+  ],
+  "steps": [
+    {
+      "id": "next-id",
+      "type": "view",
+      "address": "{{ deployment.TribunalCore }}",
+      "method": "nextCaseId",
+      "out": "nextId"
+    },
+    {
+      "id": "scan",
+      "type": "loop",
+      "from": 1,
+      "toExclusive": "{{ steps.next-id.nextId }}",
+      "body": [
+        {
+          "id": "status",
+          "type": "view",
+          "address": "{{ deployment.TribunalCore }}",
+          "method": "caseStatus",
+          "args": ["{{ i }}"],
+          "out": "status"
+        },
+        {
+          "id": "alert",
+          "type": "if",
+          "cond": "status == 1 && now - filedAt(i) > 3600",
+          "then": [
+            {
+              "type": "discord",
+              "channel": "{{ env.DISCORD_CHANNEL }}",
+              "message": "Case #{{ i }} has been in Filed status for over an hour. Investigate."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
