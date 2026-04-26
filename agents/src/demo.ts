@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import { ethers, JsonRpcProvider, Wallet } from "ethers";
 
 import { createInMemoryBus } from "./transport/in-memory.js";
-import { subscribe } from "./transport/axl.js";
+import { createAxlClient, subscribe, type AxlClient } from "./transport/axl.js";
 import { createCannedLlm, defaultDemoScripts } from "./llm/canned.js";
 import { createTribunalClient } from "./chain/tribunal-client.js";
 import { createClerk } from "./roles/clerk.js";
@@ -153,12 +153,27 @@ async function main() {
   await (await tribunalCore.acceptCase(caseId, [judgeAgentId], 1n)).wait();
   log("accept", `case #${caseId} accepted, single-judge panel`);
 
-  // Wire the agent runtime with mocks.
-  const bus = createInMemoryBus();
-  const clerkAxl  = bus.newClient("CLERK");
-  const lawyerAaxl= bus.newClient("LAWYER_A");
-  const lawyerBaxl= bus.newClient("LAWYER_B");
-  const judgeAxl  = bus.newClient("JUDGE");
+  // Wire the agent runtime. Default uses an in-memory bus; set
+  // AXL_USE_REAL=1 to talk to four real AXL Go nodes on the standard
+  // port layout (9002 clerk / 9012 lawyer-A / 9022 lawyer-B / 9032 judge).
+  const useRealAxl = process.env.AXL_USE_REAL === "1";
+  let clerkAxl: AxlClient, lawyerAaxl: AxlClient, lawyerBaxl: AxlClient, judgeAxl: AxlClient;
+  let clerkPeer: string;
+  if (useRealAxl) {
+    clerkAxl   = createAxlClient({ baseUrl: process.env.AXL_CLERK_URL    ?? "http://127.0.0.1:9002" });
+    lawyerAaxl = createAxlClient({ baseUrl: process.env.AXL_LAWYER_A_URL ?? "http://127.0.0.1:9012" });
+    lawyerBaxl = createAxlClient({ baseUrl: process.env.AXL_LAWYER_B_URL ?? "http://127.0.0.1:9022" });
+    judgeAxl   = createAxlClient({ baseUrl: process.env.AXL_JUDGE_URL    ?? "http://127.0.0.1:9032" });
+    clerkPeer  = await clerkAxl.peerId();
+    log("axl", `using real AXL nodes; clerk peer ${clerkPeer.slice(0, 16)}…`);
+  } else {
+    const bus = createInMemoryBus();
+    clerkAxl   = bus.newClient("CLERK");
+    lawyerAaxl = bus.newClient("LAWYER_A");
+    lawyerBaxl = bus.newClient("LAWYER_B");
+    judgeAxl   = bus.newClient("JUDGE");
+    clerkPeer  = "CLERK";
+  }
   const llm = createCannedLlm(defaultDemoScripts());
   const storage = inMemoryStorage();
 
@@ -185,7 +200,7 @@ async function main() {
     side: "accuser",
     brief: "Alice claims she delivered a research report on 2026-04-20.",
     ensName: "lawyer-quinn.tribunal.eth",
-    clerkPeerId: "CLERK",
+    clerkPeerId: clerkPeer,
     caseId: caseId.toString(),
     llm, axl: lawyerAaxl, model: "demo",
   });
@@ -193,7 +208,7 @@ async function main() {
     side: "defendant",
     brief: "Bob never received the substantive report.",
     ensName: "lawyer-rivers.tribunal.eth",
-    clerkPeerId: "CLERK",
+    clerkPeerId: clerkPeer,
     caseId: caseId.toString(),
     llm, axl: lawyerBaxl, model: "demo",
   });
@@ -206,7 +221,7 @@ async function main() {
     llm,
     axl: judgeAxl,
     tribunal: tribunalForJudge,
-    clerkPeerId: "CLERK",
+    clerkPeerId: clerkPeer,
     model: "demo",
   });
 
