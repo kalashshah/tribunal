@@ -2,6 +2,8 @@ import { keccak256, toUtf8Bytes } from "ethers";
 import type { AxlClient } from "../transport/axl.js";
 import type { Llm } from "../llm/client.js";
 import type { TribunalClient } from "../chain/tribunal-client.js";
+import { askParty, type Party, tryParseJsonObject } from "./qa.js";
+import type { PartyAgent } from "./party.js";
 
 export interface JudgeArgs {
   ensName: string;
@@ -17,6 +19,12 @@ export interface JudgeArgs {
   tribunal: TribunalClient;
   clerkPeerId: string;
   model: string;
+  partyEns: { accuser: string; defendant: string };
+  /// Optional party agents for judge clarifying questions. If absent, judge
+  /// skips clarifying questions silently.
+  partyAgents?: { accuser: PartyAgent; defendant: PartyAgent };
+  /// Optional transcript getter for party agent context.
+  getTranscript?: () => string;
 }
 
 export interface Ruling {
@@ -80,11 +88,59 @@ function parseRuling(text: string): Ruling {
 }
 
 export interface Judge {
+  /// Optional pre-deliberation step: judge may pose ONE clarifying question
+  /// to either party if a material fact is unclear. Returns true if a
+  /// question was asked (and answered, or timed out). The answer lands in
+  /// the transcript via the qa bridge so deliberateAndRule sees it.
+  clarifyingQuestion(transcriptText: string): Promise<boolean>;
   deliberateAndRule(transcriptText: string): Promise<Ruling>;
+}
+
+interface ClarifyAction {
+  action: "ask" | "none";
+  target?: Party;
+  question?: string;
 }
 
 export function createJudge(a: JudgeArgs): Judge {
   return {
+    async clarifyingQuestion(transcriptText) {
+      const out = await a.llm.complete({
+        system:
+          SYSTEM(a.personaPrompt, a.priorRulings) +
+          `\n\nBefore ruling you may pose ONE clarifying question to either party — only if a material fact is genuinely unclear from the transcript. Output JSON:\n` +
+          `  {"action":"ask","target":"accuser"|"defendant","question":"<one question>"}\n` +
+          `  {"action":"none"}\n` +
+          `Prefer "none" unless a question would meaningfully change the outcome.`,
+        messages: [{ role: "user", content: `Transcript so far:\n${transcriptText}\n\nDecide.` }],
+        responseFormat: "json",
+      });
+      const act = tryParseJsonObject<ClarifyAction>(out.text);
+      if (!act || act.action !== "ask" || !act.target || !act.question) return false;
+      const partyAgent = a.partyAgents?.[act.target];
+      if (!partyAgent) return false; // no party agent wired — skip silently
+      try {
+        const transcriptSoFar = a.getTranscript?.() ?? transcriptText;
+        await askParty(
+          {
+            caseId: a.caseId.toString(),
+            axl: a.axl,
+            clerkPeerId: a.clerkPeerId,
+            asker: a.ensName,
+            askerSide: "judge",
+            partyEns: a.partyEns,
+          },
+          act.target,
+          act.question,
+          transcriptSoFar,
+          partyAgent,
+        );
+        return true;
+      } catch {
+        return false; // failed — proceed without
+      }
+    },
+
     async deliberateAndRule(transcriptText) {
       // Up to 3 attempts: free models occasionally return malformed JSON.
       let ruling: Ruling | undefined;

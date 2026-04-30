@@ -7,6 +7,14 @@ function deps() {
   return { llm, axl };
 }
 
+function stubPartyAgent() {
+  return {
+    side: "accuser" as const,
+    ensName: "alice.tribunal.eth",
+    answer: vi.fn(async () => "stub party answer"),
+  };
+}
+
 function lawyer({ llm, axl }: ReturnType<typeof deps>) {
   return createLawyer({
     side: "accuser",
@@ -17,6 +25,7 @@ function lawyer({ llm, axl }: ReturnType<typeof deps>) {
     llm: llm as any,
     axl: axl as any,
     model: "claude-sonnet-4-6",
+    partyAgent: stubPartyAgent(),
   });
 }
 

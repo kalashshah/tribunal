@@ -35,6 +35,7 @@ import { createTribunalClient } from "./chain/tribunal-client.js";
 import { createClerk } from "./roles/clerk.js";
 import { createLawyer } from "./roles/lawyer.js";
 import { createJudge } from "./roles/judge.js";
+import { createPartyAgent } from "./roles/party.js";
 import type { ZgStorage } from "./storage/og-storage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -217,21 +218,47 @@ async function main() {
   });
   const stopSubscribe = subscribe(clerkAxl, async (env) => { await clerk.handleIncoming(env); }, { idleBackoffMs: 10 });
 
+  const partyEns = { accuser: "alice.tribunal.eth", defendant: "bob.tribunal.eth" };
+  const accusation = "Alice claims she delivered a research report on 2026-04-20.";
+  const accuserPartyAgent = createPartyAgent({
+    side: "accuser",
+    ensName: partyEns.accuser,
+    accusation,
+    llm,
+    model: "demo",
+  });
+  const defendantPartyAgent = createPartyAgent({
+    side: "defendant",
+    ensName: partyEns.defendant,
+    accusation,
+    llm,
+    model: "demo",
+  });
   const lawyerA = createLawyer({
     side: "accuser",
-    brief: "Alice claims she delivered a research report on 2026-04-20.",
+    brief: accusation,
     ensName: "lawyer-quinn.tribunal.eth",
+    clientEns: partyEns.accuser,
+    opponentEns: partyEns.defendant,
+    partyEns,
     clerkPeerId: clerkPeer,
     caseId: caseId.toString(),
     llm, axl: lawyerAaxl, model: "demo",
+    partyAgent: accuserPartyAgent,
+    getTranscript: () => clerk.render(),
   });
   const lawyerB = createLawyer({
     side: "defendant",
     brief: "Bob never received the substantive report.",
     ensName: "lawyer-rivers.tribunal.eth",
+    clientEns: partyEns.defendant,
+    opponentEns: partyEns.accuser,
+    partyEns,
     clerkPeerId: clerkPeer,
     caseId: caseId.toString(),
     llm, axl: lawyerBaxl, model: "demo",
+    partyAgent: defendantPartyAgent,
+    getTranscript: () => clerk.render(),
   });
   const judge = createJudge({
     ensName: "judge-athena.tribunal.eth",
@@ -244,6 +271,9 @@ async function main() {
     tribunal: tribunalForJudge,
     clerkPeerId: clerkPeer,
     model: "demo",
+    partyEns,
+    partyAgents: { accuser: accuserPartyAgent, defendant: defendantPartyAgent },
+    getTranscript: () => clerk.render(),
   });
 
   const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));

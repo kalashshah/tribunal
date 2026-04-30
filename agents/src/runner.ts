@@ -38,6 +38,7 @@ import { createTribunalClient } from "./chain/tribunal-client.js";
 import { createClerk } from "./roles/clerk.js";
 import { createLawyer } from "./roles/lawyer.js";
 import { createJudge } from "./roles/judge.js";
+import { createPartyAgent } from "./roles/party.js";
 import { createZgStorage, type ZgStorage } from "./storage/og-storage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -206,7 +207,6 @@ async function main() {
   // too low`. NonceManager allocates incrementing nonces locally so
   // concurrent sends from the same wallet get unique slots.
   const baseOperator = new Wallet(envOrThrow("OG_PRIVATE_KEY"), provider);
-  const operator = new NonceManager(baseOperator);
   // The judge agent on 0G was registered with a hardhat dev key during the
   // initial deploy; submitRuling + appendRulingMemory must be signed by
   // *that* key, not the operator. Default keeps the deployed wiring; can be
@@ -215,7 +215,17 @@ async function main() {
     process.env.JUDGE_PRIVATE_KEY ?? "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
     provider,
   );
-  const judgeWallet = new NonceManager(baseJudge);
+
+  const operatorNm = new NonceManager(baseOperator);
+  // When JUDGE_PRIVATE_KEY resolves to the same address as OG_PRIVATE_KEY,
+  // share the NonceManager so concurrent sends don't race on nonces.
+  const judgeNm =
+    baseJudge.address.toLowerCase() === baseOperator.address.toLowerCase()
+      ? operatorNm
+      : new NonceManager(baseJudge);
+
+  const operator = operatorNm;
+  const judgeWallet = judgeNm;
   console.log("Operator:", baseOperator.address);
   console.log("Judge:   ", baseJudge.address);
 
@@ -346,6 +356,21 @@ async function main() {
 
       const partyEns = { accuser: accuserEns, defendant: defendantEns };
 
+      const accuserPartyAgent = createPartyAgent({
+        side: "accuser",
+        ensName: accuserEns,
+        accusation: accusationText,
+        llm,
+        model: picked.model,
+      });
+      const defendantPartyAgent = createPartyAgent({
+        side: "defendant",
+        ensName: defendantEns,
+        accusation: accusationText,
+        llm,
+        model: picked.model,
+      });
+
       const lawyerA = createLawyer({
         side: "accuser",
         brief: accusationText,
@@ -358,6 +383,8 @@ async function main() {
         llm,
         axl: lawyerAaxl,
         model: picked.model,
+        partyAgent: accuserPartyAgent,
+        getTranscript: () => clerk.render(),
       });
       const lawyerB = createLawyer({
         side: "defendant",
@@ -374,6 +401,8 @@ async function main() {
         llm,
         axl: lawyerBaxl,
         model: picked.model,
+        partyAgent: defendantPartyAgent,
+        getTranscript: () => clerk.render(),
       });
       const judge = createJudge({
         ensName: "judge-athena.tribunal.eth",
@@ -388,6 +417,8 @@ async function main() {
         clerkPeerId: clerkPeer,
         model: picked.model,
         partyEns,
+        partyAgents: { accuser: accuserPartyAgent, defendant: defendantPartyAgent },
+        getTranscript: () => clerk.render(),
       });
 
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
