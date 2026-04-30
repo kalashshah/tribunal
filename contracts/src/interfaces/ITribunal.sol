@@ -6,22 +6,22 @@ interface ITribunal {
 
     event CaseFiled(
         uint256 indexed caseId,
-        uint256 indexed accuserAgentId,
-        uint256 indexed defendantAgentId,
+        address indexed accuser,
+        address indexed defendant,
         address escrowAdapter,
         uint256 escrowId,
-        string  accusationCid
+        string  accusationCid,
+        uint256 fee
     );
-    event CaseAccepted(uint256 indexed caseId, uint256[] judgeAgentIds);
+    event CaseAccepted(uint256 indexed caseId, address[] judges);
     event CaseEvent(uint256 indexed caseId, uint256 indexed seq, address indexed sender, bytes32 contentHash);
-    event RulingSubmitted(uint256 indexed caseId, uint256 indexed judgeAgentId, bool prevailingIsAccuser, bytes32 opinionHash);
+    event RulingSubmitted(uint256 indexed caseId, address indexed judge, bool prevailingIsAccuser, bytes32 opinionHash);
     event CaseRuled(uint256 indexed caseId, bool prevailingIsAccuser);
 
     function fileCase(
-        uint256 accuserAgentId,
-        uint256 defendantAgentId,
+        address defendant,
         address escrowAdapter,
         uint256 escrowId,
         string calldata accusationCid
-    ) external returns (uint256 caseId);
+    ) external payable returns (uint256 caseId);
 }
