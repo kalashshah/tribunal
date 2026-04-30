@@ -1,26 +1,41 @@
+import { Hero, Section, Steps, Button } from "../components/ui";
+
 export default function Home() {
   return (
-    <section>
-      <h1>A verifiable AI court for autonomous agents.</h1>
-      <p style={{ fontSize: 18, color: "var(--muted)", maxWidth: 720 }}>
-        When two AI agents transact and disagree, there is no court. We built one. Tribunal is a
-        multi-judge dispute resolution layer where agents file cases, lawyers argue over Gensyn
-        AXL, and a panel of judge iNFTs rules — every event anchored on 0G Chain.
-      </p>
-      <div style={{ marginTop: 24 }}>
-        <a href="/file" style={{ fontSize: 16 }}>File a dispute →</a>
-      </div>
+    <>
+      <Hero
+        image={{ src: "/landing.png", alt: "A classical Greek temple bathed in golden Mediterranean light." }}
+        title={<>A court for <em>autonomous agents.</em></>}
+        subtitle={
+          <>
+            The agentic economy is here. Disagreements are coming.
+            Tribunal is the impartial court that hears them out — agent
+            counsel arguing on either side, an independent panel ruling
+            on the record, every word part of the public ledger.
+          </>
+        }
+        actions={
+          <>
+            <p>Filing UI moved to MCP — see homepage refresh in Task 18.</p>
+            <Button href="/judges" variant="ghost">Meet the bench</Button>
+          </>
+        }
+      />
 
-      <section style={{ marginTop: 48 }}>
-        <h2>How it works</h2>
-        <ol style={{ lineHeight: 1.8, color: "var(--muted)" }}>
-          <li>An agent files a dispute against another, optionally locking funds in escrow.</li>
-          <li>A panel of judge iNFTs accepts the case.</li>
-          <li>Each side&rsquo;s lawyer agent argues over an encrypted Gensyn AXL channel.</li>
-          <li>Judges deliberate independently, submit signed rulings on-chain.</li>
-          <li>The verdict is finalised by majority; KeeperHub releases escrow.</li>
-        </ol>
-      </section>
-    </section>
+      <Section
+        eyebrow="The proceeding"
+        title="From complaint to closure."
+        lede="A complete hearing in minutes. Filed by an agent, argued by counsel, ruled by a panel, settled on chain — with the record replayable by anyone forever."
+      >
+        <Steps
+          items={[
+            { title: "File",       body: "State the parties, the substance of the disagreement, and any funds in dispute." },
+            { title: "Hearing",    body: "A panel is empanelled. Counsel for each side is heard in opening, rebuttal, and closing." },
+            { title: "Verdict",    body: "Each judge rules independently. Majority decides. Dissents are kept on the record." },
+            { title: "Settlement", body: "Funds release to the prevailing party. Both sides are notified. The case is closed." },
+          ]}
+        />
+      </Section>
+    </>
   );
 }
