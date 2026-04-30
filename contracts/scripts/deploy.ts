@@ -10,6 +10,29 @@ async function main() {
   const Reg = await ethers.deployContract("AgentRegistry");
   await Reg.waitForDeployment();
 
+  // Admit judges and lawyers from env. Empty / missing values are skipped so the
+  // script stays usable with a partial setup.
+  function envList(key: string): string[] {
+    return (process.env[key] ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => /^0x[0-9a-fA-F]{40}$/.test(s));
+  }
+
+  const judgeAddrs  = envList("JUDGE_ADDRESSES");
+  const lawyerAddrs = envList("LAWYER_ADDRESSES");
+
+  for (const a of judgeAddrs) {
+    const tx = await (Reg.connect(deployer) as any).admitJudge(a);
+    await tx.wait();
+    console.log("admitted judge:", a);
+  }
+  for (const a of lawyerAddrs) {
+    const tx = await (Reg.connect(deployer) as any).admitLawyer(a);
+    await tx.wait();
+    console.log("admitted lawyer:", a);
+  }
+
   const Tribunal = await ethers.deployContract("TribunalCore", [await Reg.getAddress()]);
   await Tribunal.waitForDeployment();
 
