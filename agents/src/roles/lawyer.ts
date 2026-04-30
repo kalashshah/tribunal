@@ -17,6 +17,13 @@ export interface LawyerArgs {
   model: string;
   partyAgent: PartyAgent;             // autonomous party agent for Q&A
   getTranscript?: () => string;       // optional: clerk.render() for party agent context
+  partyAddress: { accuser: string; defendant: string };
+  backendUrl: string;
+  mode: "human" | "auto";
+  qaTimeoutMs?: number;
+  /// Optional pre-rendered case docket text. Re-render between phases for
+  /// fresh evidence; the lawyer captures it by closure at construction time.
+  docketText?: string;
 }
 
 export interface Lawyer {
@@ -34,18 +41,21 @@ export interface Lawyer {
   closingStatement(transcriptText: string): Promise<string>;
 }
 
-const SYSTEM = (side: string, brief: string) =>
+const SYSTEM = (side: string, brief: string, docketText: string) =>
   `You are an experienced trial lawyer representing the ${side} in the Tribunal AI court.
 
 Original brief from your client:
 ${brief}
 
+${docketText}
+
 Discipline:
-- NEVER invent statutes, case law, contract terms, dates, dollar amounts, or facts.
-- Cite only what your client has confirmed or what is in the trial transcript.
-- If a material fact is missing, ASK your client for it (you have a question budget per phase).
-- Be terse and concrete. Each statement: claim → evidence → conclusion.
-- If you don't have enough to argue something, say so plainly rather than guess.
+- Cite ONLY items from the case docket above (by their evd_ ids) or statements already in the trial transcript.
+- NEVER invent statutes, case law, contract terms, dates, dollar amounts, transaction hashes, names, or quotes.
+- During discovery, your job is to surface DOCKET-LEVEL specifics from your client (tx hashes, dates from messages, exact contract clauses). Ask for the missing concrete artifact, not abstract reasoning.
+- If a material fact is missing AND not in the docket, ASK your client (you have a question budget per phase). If after asking the client cannot produce it, do not argue it.
+- Each statement: claim → evidence (cite [evd_…] or transcript) → conclusion. Be terse.
+- If you do not have enough to argue something, say so plainly rather than guess.
 
 You will be asked to act in phases (discovery, opening, cross-examination, rebuttal, closing). Maintain consistency with what you've already said earlier in the case.`;
 
@@ -64,7 +74,7 @@ export function createLawyer(a: LawyerArgs): Lawyer {
   async function think(prompt: string, json: boolean): Promise<string> {
     memory.push({ role: "user", content: prompt });
     const out = await a.llm.complete({
-      system: SYSTEM(a.side, a.brief),
+      system: SYSTEM(a.side, a.brief, a.docketText ?? "Case docket: (not yet loaded)"),
       messages: memory,
       ...(json ? { responseFormat: "json" as const } : {}),
     });
@@ -121,6 +131,10 @@ export function createLawyer(a: LawyerArgs): Lawyer {
               asker: a.ensName,
               askerSide: a.side,
               partyEns: a.partyEns ?? { accuser: "", defendant: "" },
+              partyAddress: a.partyAddress,
+              backendUrl: a.backendUrl,
+              mode: a.mode,
+              timeoutMs: a.qaTimeoutMs,
             },
             target,
             act.question,
