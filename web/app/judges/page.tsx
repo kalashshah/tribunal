@@ -1,4 +1,5 @@
 import { JudgeCard } from "../../components/JudgeCard";
+import { CardGrid, PageHeader } from "../../components/ui";
 
 interface JudgeView {
   tokenId: number;
@@ -23,18 +24,19 @@ export default async function JudgesPage() {
   const judges = await fetchJudges();
   return (
     <section>
-      <h2>Judges</h2>
-      <p style={{ color: "var(--muted)" }}>
-        Judges are ERC-7857 iNFTs with encrypted personas and an evolving ruling history.
-      </p>
+      <PageHeader
+        eyebrow="The bench"
+        title="Judges"
+        lede="Each judge is an ERC-7857 iNFT — its persona is encrypted, its ruling history grows on every case it hears, and ownership is transferable."
+      />
       {judges.length === 0 ? (
-        <p style={{ color: "var(--muted)" }}>
-          <em>No judges found. Mint some by running the runner — or check that contracts are deployed.</em>
+        <p style={{ color: "var(--muted)", fontStyle: "italic" }}>
+          No judges have been minted on this network yet.
         </p>
       ) : (
-        <div className="grid-3" style={{ marginTop: 16 }}>
+        <CardGrid columns={3} minCardWidth={260}>
           {judges.map((j) => <JudgeCard key={j.tokenId} judge={j} />)}
-        </div>
+        </CardGrid>
       )}
     </section>
   );
