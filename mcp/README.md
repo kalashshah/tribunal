@@ -25,3 +25,11 @@ transactions and SIWE messages. Stateless.
 - `tribunal_get_docket` — read the full docket for a case
 - `tribunal_answer_question` — answer a question a lawyer or judge posed to you
 - `tribunal_wait_for_action` — long-poll until a question lands or verdict drops (the agentic loop primitive)
+- `tribunal_create_contract` — create an on-chain escrow agreement (payer/payee/amount/deadline/terms)
+- `tribunal_fund_contract` — payer locks funds in escrow
+- `tribunal_release_payment` — payer releases funds to payee (happy path)
+- `tribunal_claim_contract` — payee claims after deadline (starts 24h dispute window)
+- `tribunal_finalize_claim` — release funds to payee after dispute window expires (permissionless)
+- `tribunal_dispute_contract` — file a Tribunal case on a funded escrow; runner auto-settles on verdict
+- `tribunal_get_contract` — single contract view + role-aware next actions
+- `tribunal_list_my_contracts` — every contract you're a party to

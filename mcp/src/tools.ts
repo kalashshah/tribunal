@@ -109,6 +109,74 @@ export const toolDefinitions = [
       required: ["caseId"],
     },
   },
+  {
+    name: "tribunal_create_contract",
+    description:
+      `Create an on-chain escrow contract for a payment-for-work arrangement. Use BEFORE filing a dispute when money is at stake — the escrow holds funds during work and pays out automatically based on the verdict if disputed.\n\n` +
+      `FLOW: (1) you call this to create the agreement, (2) the PAYER calls tribunal_fund_contract to lock the funds, (3) work happens off-chain, (4a) happy path: payer calls tribunal_release_payment OR payee calls tribunal_claim_contract after deadline + 24h, OR (4b) dispute path: either party calls tribunal_dispute_contract → trial → automatic settlement.\n\n` +
+      `Inputs: payer (address or *.tribunal.eth name), payee (defaults to YOU if omitted), amount in OG (e.g. "0.5"), deadline ("in 7 days" / ISO date / unix seconds), terms (free-form description of the work). Returns the contractId + nextActions.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        payer:    { type: "string", description: "0x address or *.tribunal.eth name of who owes payment" },
+        payee:    { type: "string", description: "0x address or *.tribunal.eth name of who receives payment. Defaults to caller." },
+        amount:   { type: "string", description: "Amount in OG, e.g. \"0.5\" or \"1\"" },
+        deadline: { type: "string", description: "Deadline. Examples: \"in 7 days\", \"in 24 hours\", \"2026-05-15T00:00:00Z\", or unix seconds" },
+        terms:    { type: "string", description: "Plain-text description of the work covered by the agreement" },
+      },
+      required: ["payer", "amount", "deadline", "terms"],
+    },
+  },
+  {
+    name: "tribunal_fund_contract",
+    description:
+      `Lock funds in escrow for a contract you owe payment on (you are the payer). Sends exactly the agreed amount in native OG to the escrow contract. Status moves Draft → Funded. Reversible only via release, claim-after-deadline, or dispute → verdict.`,
+    inputSchema: { type: "object", properties: { contractId: { type: "string" } }, required: ["contractId"] },
+  },
+  {
+    name: "tribunal_release_payment",
+    description:
+      `Happy path. As the payer, release the locked funds to the payee — use when the work is done and you're satisfied. Status moves Funded → Released. After this, no dispute is possible.`,
+    inputSchema: { type: "object", properties: { contractId: { type: "string" } }, required: ["contractId"] },
+  },
+  {
+    name: "tribunal_claim_contract",
+    description:
+      `As the payee, claim payment after the contract deadline has passed. This starts a 24-hour dispute window during which the payer can call tribunal_dispute_contract to challenge. If no dispute lands, anyone can call tribunal_finalize_claim to release funds to you.`,
+    inputSchema: { type: "object", properties: { contractId: { type: "string" } }, required: ["contractId"] },
+  },
+  {
+    name: "tribunal_finalize_claim",
+    description:
+      `Permissionless. Called after a payee has claimed and the 24-hour dispute window has elapsed with no dispute. Releases funds to the payee. Anyone can call this — typically the payee themselves.`,
+    inputSchema: { type: "object", properties: { contractId: { type: "string" } }, required: ["contractId"] },
+  },
+  {
+    name: "tribunal_dispute_contract",
+    description:
+      `File a Tribunal dispute on a funded escrow contract. Either party may call. This INTERNALLY calls tribunal_file_case with the right escrow params, locks the agreement (status → Disputed), and starts a trial. ` +
+      `⚠️ Same evidence rules apply — gather concrete facts (emails, tx hashes, message logs) BEFORE disputing. After this returns, immediately call tribunal_submit_evidence repeatedly, then tribunal_wait_for_action to handle questions and the verdict. The runner auto-settles the escrow once the verdict drops; the winner gets paid without a separate call.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        contractId: { type: "string" },
+        accusation: { type: "string", description: "Plain-text description of why you're disputing — what was promised, what didn't happen, why the verdict should go your way" },
+      },
+      required: ["contractId", "accusation"],
+    },
+  },
+  {
+    name: "tribunal_get_contract",
+    description:
+      `Read a single escrow contract: parties, amount, deadline, current status, terms. Use to brief the user or to decide which action to take next. The response includes nextActions tailored to your role (payer / payee / observer) and the current state.`,
+    inputSchema: { type: "object", properties: { contractId: { type: "string" } }, required: ["contractId"] },
+  },
+  {
+    name: "tribunal_list_my_contracts",
+    description:
+      `List every escrow contract you're a party to (payer or payee), with their current state. Useful for "what's pending for me?" Pair with tribunal_get_contract for full per-contract guidance.`,
+    inputSchema: { type: "object", properties: {} },
+  },
 ] as const;
 
 export async function registerTools(req: CallToolRequest): Promise<{ content: Array<{ type: "text"; text: string }> }> {
@@ -264,6 +332,72 @@ export async function registerTools(req: CallToolRequest): Promise<{ content: Ar
       text = await ev.handleWaitForAction(evidenceCtx, args as any);
     else
       text = await ev.handleMyCases(evidenceCtx);
+    return { content: [{ type: "text", text }] };
+  }
+
+  if (
+    name === "tribunal_create_contract" ||
+    name === "tribunal_fund_contract" ||
+    name === "tribunal_release_payment" ||
+    name === "tribunal_claim_contract" ||
+    name === "tribunal_finalize_claim" ||
+    name === "tribunal_dispute_contract" ||
+    name === "tribunal_get_contract" ||
+    name === "tribunal_list_my_contracts"
+  ) {
+    const { createChainContext } = await import("./signer.js");
+    const ctx = createChainContext(cfg);
+    const escrowAddress = ctx.contracts.TribunalEscrow;
+    if (!escrowAddress) throw new Error("TribunalEscrow address missing from deployment.json — redeploy with the latest deploy.ts");
+    const cm = await import("./tools-contracts.js");
+    // Wallet acts as both signer and provider source. ethers v6 wallets are signers.
+    const provider = ctx.wallet.provider ?? ctx.provider;
+    if (!provider) throw new Error("provider missing on wallet");
+    const explorerBase = process.env.OG_EXPLORER_BASE ?? "https://chainscan-galileo.0g.ai";
+    const cCtx: import("./tools-contracts.js").ContractsCtx = {
+      backendUrl: cfg.backendUrl,
+      walletAddress: ctx.wallet.address,
+      signer: ctx.wallet,
+      provider,
+      escrowAddress,
+      tribunalCoreAddress: ctx.contracts.TribunalCore,
+      explorerBase,
+      resolveAddress: async (input: string) => {
+        if (/^0x[0-9a-fA-F]{40}$/.test(input)) {
+          const { ethers } = await import("ethers");
+          return ethers.getAddress(input);
+        }
+        const r = await fetch(`${cfg.backendUrl}/api/identity/resolve?name=${encodeURIComponent(input)}`);
+        const j = (await r.json()) as { address?: string | null };
+        if (!j.address) throw new Error(`cannot resolve ${input}`);
+        const { ethers } = await import("ethers");
+        return ethers.getAddress(j.address);
+      },
+    };
+    let text: string;
+    const a = (args ?? {}) as any;
+    if (name === "tribunal_create_contract")
+      text = await cm.handleCreateContract(cCtx, {
+        payerInput: a.payer,
+        payeeInput: a.payee,
+        amount: a.amount,
+        deadline: a.deadline,
+        terms: a.terms,
+      });
+    else if (name === "tribunal_fund_contract")
+      text = await cm.handleFundContract(cCtx, a);
+    else if (name === "tribunal_release_payment")
+      text = await cm.handleReleasePayment(cCtx, a);
+    else if (name === "tribunal_claim_contract")
+      text = await cm.handleClaimContract(cCtx, a);
+    else if (name === "tribunal_finalize_claim")
+      text = await cm.handleFinalizeClaim(cCtx, a);
+    else if (name === "tribunal_dispute_contract")
+      text = await cm.handleDisputeContract(cCtx, a);
+    else if (name === "tribunal_get_contract")
+      text = await cm.handleGetContract(cCtx, a);
+    else
+      text = await cm.handleListMyContracts(cCtx);
     return { content: [{ type: "text", text }] };
   }
 
