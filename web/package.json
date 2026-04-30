@@ -8,10 +8,14 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
+    "ethers": "^6.13.1",
     "next": "^14.2.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "ethers": "^6.13.1"
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "viem": "^2.48.4"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
