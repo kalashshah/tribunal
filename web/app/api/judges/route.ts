@@ -14,7 +14,13 @@ const abi = [
 function loadDeployment(): { JudgeINFT: string } | null {
   try {
     const p = path.resolve(process.cwd(), "../docs/deployment.json");
-    return JSON.parse(fs.readFileSync(p, "utf8"));
+    const j = JSON.parse(fs.readFileSync(p, "utf8"));
+    const addr =
+      j?.chains?.ogGalileo?.contracts?.JudgeINFT ??
+      j?.legacy?.JudgeINFT ??
+      j?.JudgeINFT;
+    if (!addr) return null;
+    return { JudgeINFT: addr };
   } catch {
     return null;
   }

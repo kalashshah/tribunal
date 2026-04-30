@@ -12,10 +12,25 @@ const abi = [
 function loadDeployment(): { VerdictLog: string } | null {
   try {
     const p = path.resolve(process.cwd(), "../docs/deployment.json");
-    return JSON.parse(fs.readFileSync(p, "utf8"));
+    const j = JSON.parse(fs.readFileSync(p, "utf8"));
+    const addr =
+      j?.chains?.ogGalileo?.contracts?.VerdictLog ??
+      j?.legacy?.VerdictLog ??
+      j?.VerdictLog;
+    if (!addr) return null;
+    return { VerdictLog: addr };
   } catch {
     return null;
   }
+}
+
+function loadFinalizeTxHash(caseId: string): string | undefined {
+  try {
+    const p = path.resolve(process.cwd(), `../.verdict-${caseId}.json`);
+    if (!fs.existsSync(p)) return undefined;
+    const j = JSON.parse(fs.readFileSync(p, "utf8")) as { finalizeTxHash?: string };
+    return j.finalizeTxHash;
+  } catch { return undefined; }
 }
 
 export async function GET(_req: Request, ctx: { params: { caseId: string } }) {
@@ -32,6 +47,7 @@ export async function GET(_req: Request, ctx: { params: { caseId: string } }) {
         prevailingIsAccuser: v.prevailingIsAccuser,
         opinionRoot: v.opinionRoot,
         postedAt: Number(v.postedAt),
+        finalizeTxHash: loadFinalizeTxHash(ctx.params.caseId),
       },
     });
   } catch (e: any) {

@@ -6,7 +6,10 @@ export type EventKind =
   | "argument"
   | "evidence"
   | "deliberation"
-  | "ruling";
+  | "ruling"
+  | "question"   // an agent asks a party (or another agent) for information
+  | "answer"     // the answer to a previous `question` (echoed into transcript)
+  | "briefing";  // a lawyer files a discovery brief (post-interview summary)
 
 export interface RawEvent {
   kind: EventKind;
