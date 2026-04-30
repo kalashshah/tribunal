@@ -5,7 +5,7 @@ import type { MCPConfig } from "./config.js";
 export interface ChainContext {
   provider: ethers.JsonRpcProvider;
   wallet: ethers.Wallet;
-  contracts: { AgentRegistry: string; TribunalCore: string };
+  contracts: { AgentRegistry: string; TribunalCore: string; TribunalEscrow?: string; EscrowAdapter?: string };
 }
 
 export function createChainContext(cfg: MCPConfig): ChainContext {
@@ -14,5 +14,5 @@ export function createChainContext(cfg: MCPConfig): ChainContext {
   if (!c?.TribunalCore || !c?.AgentRegistry) throw new Error("TribunalCore/AgentRegistry missing in deployment.json");
   const provider = new ethers.JsonRpcProvider(cfg.rpcUrl);
   const wallet   = new ethers.Wallet(cfg.privateKey, provider);
-  return { provider, wallet, contracts: { AgentRegistry: c.AgentRegistry, TribunalCore: c.TribunalCore } };
+  return { provider, wallet, contracts: { AgentRegistry: c.AgentRegistry, TribunalCore: c.TribunalCore, TribunalEscrow: c.TribunalEscrow, EscrowAdapter: c.EscrowAdapter } };
 }
