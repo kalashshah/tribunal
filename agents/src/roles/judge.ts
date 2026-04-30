@@ -25,6 +25,13 @@ export interface JudgeArgs {
   partyAgents?: { accuser: PartyAgent; defendant: PartyAgent };
   /// Optional transcript getter for party agent context.
   getTranscript?: () => string;
+  partyAddress: { accuser: string; defendant: string };
+  backendUrl: string;
+  mode: "human" | "auto";
+  qaTimeoutMs?: number;
+  /// Optional pre-rendered case docket text. The judge captures it by closure
+  /// at construction time; re-create the judge between phases for fresh text.
+  docketText?: string;
 }
 
 export interface Ruling {
@@ -32,13 +39,21 @@ export interface Ruling {
   opinion: string;
 }
 
-const SYSTEM = (persona: string, prior: string[]) =>
+const SYSTEM = (persona: string, prior: string[], docketText: string) =>
   `You are a judge in the Tribunal, an AI court for autonomous agents.
 
 ${persona}
 
 Your prior ruling hashes (precedent context):
 ${prior.length > 0 ? prior.join("\n") : "(none)"}
+
+${docketText}
+
+Decision rules:
+- Rule ONLY on the trial transcript and the docket above. If a fact is asserted but absent from both, treat it as unproven.
+- Burden: the accuser carries it. If neither side produced docket evidence, rule for the defendant.
+- Your opinion must reference docket items by evd_ id or quote transcript lines.
+- Do not invent dates, amounts, statutes, or precedents.
 
 Given the trial transcript, return JSON of the form:
   {"prevailingIsAccuser": boolean, "opinion": string}
@@ -107,7 +122,7 @@ export function createJudge(a: JudgeArgs): Judge {
     async clarifyingQuestion(transcriptText) {
       const out = await a.llm.complete({
         system:
-          SYSTEM(a.personaPrompt, a.priorRulings) +
+          SYSTEM(a.personaPrompt, a.priorRulings, a.docketText ?? "Case docket: (not loaded)") +
           `\n\nBefore ruling you may pose ONE clarifying question to either party — only if a material fact is genuinely unclear from the transcript. Output JSON:\n` +
           `  {"action":"ask","target":"accuser"|"defendant","question":"<one question>"}\n` +
           `  {"action":"none"}\n` +
@@ -129,6 +144,10 @@ export function createJudge(a: JudgeArgs): Judge {
             asker: a.ensName,
             askerSide: "judge",
             partyEns: a.partyEns,
+            partyAddress: a.partyAddress,
+            backendUrl: a.backendUrl,
+            mode: a.mode,
+            timeoutMs: a.qaTimeoutMs,
           },
           act.target,
           act.question,
@@ -147,7 +166,7 @@ export function createJudge(a: JudgeArgs): Judge {
       let lastError: unknown;
       for (let attempt = 1; attempt <= 3; attempt++) {
         const out = await a.llm.complete({
-          system: SYSTEM(a.personaPrompt, a.priorRulings),
+          system: SYSTEM(a.personaPrompt, a.priorRulings, a.docketText ?? "Case docket: (not loaded)"),
           messages: [
             { role: "user", content: `Trial transcript:\n${transcriptText}\n\nReturn the JSON now.` },
           ],
