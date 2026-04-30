@@ -1,66 +1,84 @@
-/// Question/answer bridge using autonomous party agents.
+/// Question/answer bridge.
 ///
-/// Architecture:
-///   1. Lawyer calls askParty(deps, target, question, transcriptSoFar, partyAgent).
-///   2. A `question` event is sent via AXL → clerk persists it in the transcript
-///      so the courtroom UI shows the question being asked.
-///   3. partyAgent.answer() is called directly — no human in the loop.
-///   4. The answer is sent as an `answer` event via AXL → clerk persists it
-///      and it appears in the courtroom transcript.
-///   5. The answer string is returned to the caller.
+/// Two modes:
+///   - "human" (default): post the question to the web backend and long-poll
+///     for an answer submitted by the user via MCP. On timeout, return a
+///     literal "(party did not respond)" string — never fabricate.
+///   - "auto": call partyAgent.answer() directly. Used for offline demos and
+///     unit tests; the LLM persona is constrained to refuse fabrication.
 
 import type { AxlClient } from "../transport/axl.js";
 import type { PartyAgent } from "./party.js";
+import { postQuestion, pollAnswer } from "./qa-bridge.js";
 
 export type Party = "accuser" | "defendant";
+export type PartyMode = "human" | "auto";
 
 export interface AskPartyDeps {
   caseId: string;
   axl: AxlClient;
   clerkPeerId: string;
-  asker: string;            // ENS of the agent asking
+  asker: string;
   askerSide: Party | "judge";
   partyEns: { accuser: string; defendant: string };
+  /// 0x addresses of the two parties; required in human mode.
+  partyAddress: { accuser: string; defendant: string };
+  backendUrl: string;
+  mode: PartyMode;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
 }
+
+const NO_RESPONSE = (target: Party, ens: string) =>
+  `(${target} ${ens} did not respond within the question window)`;
 
 export async function askParty(
   deps: AskPartyDeps,
   target: Party,
   question: string,
   transcriptSoFar: string,
-  partyAgent: PartyAgent,
+  partyAgent: PartyAgent | undefined,
 ): Promise<string> {
   const questionId =
     `q_${deps.caseId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  // Anchor question event in the courtroom transcript.
+  const targetEns = target === "accuser" ? deps.partyEns.accuser : deps.partyEns.defendant;
+  const targetAddr = target === "accuser" ? deps.partyAddress.accuser : deps.partyAddress.defendant;
+
+  // Anchor the question in the transcript regardless of mode.
   await deps.axl.send(deps.clerkPeerId, {
     kind: "question",
     from: deps.asker,
     body: question,
-    meta: {
-      questionId,
-      target,
-      askerSide: deps.askerSide,
-      caseId: deps.caseId,
-    },
+    meta: { questionId, target, askerSide: deps.askerSide, caseId: deps.caseId },
   });
 
-  // Party agent answers autonomously.
-  const answer = await partyAgent.answer(question, transcriptSoFar);
+  let answer: string;
+  if (deps.mode === "human") {
+    await postQuestion(deps.backendUrl, {
+      caseId: deps.caseId,
+      questionId,
+      askedBy: deps.asker,
+      target,
+      targetAddress: targetAddr,
+      body: question,
+    });
+    const polled = await pollAnswer(deps.backendUrl, deps.caseId, questionId, {
+      intervalMs: deps.pollIntervalMs,
+      timeoutMs: deps.timeoutMs,
+    });
+    answer = polled ?? NO_RESPONSE(target, targetEns);
+  } else {
+    if (!partyAgent) throw new Error(`askParty: mode=auto requires a partyAgent for ${target}`);
+    answer = await partyAgent.answer(question, transcriptSoFar);
+  }
 
-  // Anchor answer event in the courtroom transcript.
   await deps.axl.send(deps.clerkPeerId, {
     kind: "answer",
-    from: target === "accuser" ? deps.partyEns.accuser : deps.partyEns.defendant,
+    from: targetEns,
     body: answer,
-    meta: {
-      questionId,
-      answeringSide: target,
-      caseId: deps.caseId,
-    },
+    meta: { questionId, answeringSide: target, caseId: deps.caseId },
   });
-
   return answer;
 }
 
