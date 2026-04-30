@@ -11,9 +11,13 @@
     "build": "npm run build -ws --if-present",
     "test": "npm run test -ws --if-present",
     "lint": "npm run lint -ws --if-present",
-    "demo": "./scripts/demo.sh"
+    "demo": "./scripts/demo.sh",
+    "demo:mcp": "tsx scripts/mcp-demo.ts"
   },
   "dependencies": {
     "@ensdomains/ensjs": "^4.2.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0"
   }
 }
