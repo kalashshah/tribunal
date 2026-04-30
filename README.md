@@ -34,7 +34,8 @@ Uniswap is intentionally not in scope — settlement is direct ERC-20 transfer; 
 ```
 contracts/    Hardhat (solc 0.8.27, EVM cancun) — 5 contracts, 25/25 tests
 agents/       Vitest + TypeScript — transport, llm, storage, identity, roles, runner; 40/40 tests
-web/          Next.js 14 App Router — file dispute, live trial (SSE), verdict, judges
+web/          Next.js 14 App Router — live trial (SSE), verdict, judges
+mcp/          @tribunal/mcp — stdio MCP server, signs locally; tools listed in mcp/README.md
 keeper/       KeeperHub workflow JSON
 scripts/      ENS records publisher
 docs/         Spec, plan, architecture, deployment.json, demo script
@@ -44,9 +45,9 @@ docs/         Spec, plan, architecture, deployment.json, demo script
 
 Five Solidity contracts, all on 0G Chain testnet:
 
-1. **`AgentRegistry`** — minimal ERC-8004-style registry; ENS-keyed, role-tagged.
+1. **`AgentRegistry`** — Address-keyed role table (`None | Lawyer | Judge`), owner-admitted via `admitJudge` / `admitLawyer`.
 2. **`EscrowAdapter`** — generic dispute escrow, only the Tribunal can flag/release.
-3. **`TribunalCore`** — case state machine: `Filed → Accepted → Arguments → Deliberation → Ruled → Settled`. Anchors event content hashes on `recordEvent`. Multi-judge tally on `submitRuling`. Majority threshold finalises the verdict.
+3. **`TribunalCore`** — case state machine: `Filed → Accepted → Arguments → Deliberation → Ruled → Settled`. Anchors event content hashes on `recordEvent`. Multi-judge tally on `submitRuling`. Majority threshold finalises the verdict. Payable `fileCase` with `BASE_FEE = 0.01 OG` to discourage spam; role-gated `submitRuling`.
 4. **`VerdictLog`** — append-only public verdict log; the trigger surface for KeeperHub.
 5. **`JudgeINFT`** — ERC-7857-compatible iNFT for judges. Encrypted persona via `metadataRoot`, evolving precedent memory via `appendRulingMemory`. Memory-writer role wired to the Tribunal so judges' rulings auto-update their iNFT.
 
@@ -81,11 +82,12 @@ npm run dev
 
 ## Quickstart for graders
 
-1. `cp .env.example .env` and fill `OG_PRIVATE_KEY`, `OG_RPC_URL`, `ANTHROPIC_API_KEY`.
+1. `cp .env.example .env` and fill `OG_PRIVATE_KEY`, `OG_RPC_URL`, `ANTHROPIC_API_KEY`, and MCP-specific vars (see `mcp/README.md`).
 2. `cd contracts && npm install && npm run deploy:0g` — deploys the five contracts, writes addresses to `docs/deployment.json`.
 3. Build & run four AXL nodes locally (see `docs/protocols/axl-spike-notes.md` once captured, or upstream docs).
 4. `cd agents && npm install && npm run build && node dist/runner.js` — runs one full case to the on-chain ruling.
-5. `cd web && npm install && npm run dev` — open `http://localhost:3000`, file a dispute, watch the trial stream.
+5. `cd web && npm install && npm run dev` — open `http://localhost:3000`, watch the trial stream and verdicts.
+6. Cases are filed via the MCP server. See `mcp/README.md` for client config and available tools.
 
 ## Tests
 

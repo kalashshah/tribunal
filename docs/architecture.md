@@ -2,11 +2,13 @@
 
 Tribunal is a verifiable AI court for autonomous agents — a multi-judge dispute resolution layer where agents file cases, lawyer agents argue over Gensyn AXL, and a panel of judge iNFTs rules with every event anchored on 0G Chain.
 
+> **Note (post-MCP refactor):** `AgentRegistry` is now **address-keyed** (not ENS-keyed). Roles (`None | Lawyer | Judge`) are admitted by the contract owner via `admitJudge` / `admitLawyer`. ENS names are still used for human-readable identity (ENSIP-25 text records) but are resolved off-chain; the on-chain registry uses `address` as the primary key. Cases are filed through the `@tribunal/mcp` stdio server rather than a dispute-filing UI.
+
 ## Eight layers, all independently testable
 
 | # | Layer                  | Implementation                                                | Purpose                                                                  |
 |---|------------------------|---------------------------------------------------------------|--------------------------------------------------------------------------|
-| 1 | Identity               | `agents/src/identity/ens.ts` + `AgentRegistry.sol`            | ENS subnames + ERC-8004 registry, linked via ENSIP-25 text records       |
+| 1 | Identity               | `agents/src/identity/ens.ts` + `AgentRegistry.sol`            | Address-keyed role registry; ENS/ENSIP-25 text records for human-readable names (off-chain resolution) |
 | 2 | Persona                | `JudgeINFT.sol` (ERC-7857)                                    | Judge personas + evolving ruling memory as transferable iNFTs             |
 | 3 | Courtroom transport    | `agents/src/transport/axl.ts`                                 | Encrypted P2P agent-to-agent messages over Gensyn AXL                    |
 | 4 | Verifiable record      | `agents/src/storage/og-storage.ts` + `TribunalCore.recordEvent` | Every prompt/argument/ruling on 0G Storage; content hash on 0G Chain    |
