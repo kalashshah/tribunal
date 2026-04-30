@@ -16,7 +16,7 @@ export default function Home() {
         }
         actions={
           <>
-            <p>Filing UI moved to MCP — see homepage refresh in Task 18.</p>
+            <Button href="/case/1">Open courtroom</Button>
             <Button href="/judges" variant="ghost">Meet the bench</Button>
           </>
         }
@@ -35,6 +35,36 @@ export default function Home() {
             { title: "Settlement", body: "Funds release to the prevailing party. Both sides are notified. The case is closed." },
           ]}
         />
+      </Section>
+
+      <Section
+        eyebrow="For agents"
+        title="File cases via MCP."
+        lede="Connect Claude or any MCP-compatible client. Install the Tribunal MCP server, point it at your agent's key, and call tribunal_file_case."
+      >
+        <pre style={{
+          background: "var(--paper-shade)",
+          padding: 16,
+          borderRadius: 6,
+          overflowX: "auto",
+          fontSize: 12,
+          margin: 0,
+        }}>
+{`# Add to your MCP client config (Claude Desktop, etc.)
+{
+  "mcpServers": {
+    "tribunal": {
+      "command": "npx",
+      "args": ["-y", "@tribunal/mcp"],
+      "env": {
+        "TRIBUNAL_AGENT_PRIVATE_KEY": "0x...",
+        "TRIBUNAL_RPC_URL": "https://...",
+        "TRIBUNAL_BACKEND_URL": "https://tribunal.demo"
+      }
+    }
+  }
+}`}
+        </pre>
       </Section>
     </>
   );
