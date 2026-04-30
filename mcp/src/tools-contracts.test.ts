@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import {
-  handleCreateContract,
+  handleProposeContract,
   handleFundContract,
+  handleAcceptContract,
+  handleRevokeContract,
   handleGetContract,
   handleListMyContracts,
   type ContractsCtx,
@@ -28,14 +30,15 @@ vi.mock("ethers", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ethers")>();
   const HALF_ETH = 500000000000000000n; // 0.5 ether in wei — defined inside factory to avoid hoisting
 
-  // Agreement mock tuple: [payer, payee, amount, deadline, claimedAt, status, termsCid]
+  // Agreement mock tuple: [payer, payee, proposer, amount, deadline, claimedAt, status, termsCid]
   const MOCK_AGREEMENT = [
-    "0xPaYeR000000000000000000000000000000000001",
-    "0xPaYeE000000000000000000000000000000000002",
+    "0xPaYeR000000000000000000000000000000000001",       // payer
+    "0xPaYeE000000000000000000000000000000000002",       // payee
+    "0xPrOpOsEr0000000000000000000000000000000003",      // proposer (NEW)
     HALF_ETH,
     BigInt(Math.floor(Date.now() / 1000) + 86400),
     0n,
-    1, // Funded
+    2,                                                   // status: Funded under new enum
     "delivery terms",
   ];
 
@@ -46,8 +49,14 @@ vi.mock("ethers", async (importOriginal) => {
     }
     async nextId() { return 3n; }
     async getAgreement(_id: any) { return MOCK_AGREEMENT; }
-    async createAgreement(..._args: any[]) {
+    async proposeAgreement(..._args: any[]) {
       return { wait: async () => ({ hash: "0xabc", logs: [{ topics: [], data: "0x" }] }) };
+    }
+    async acceptAgreement(..._args: any[]) {
+      return { wait: async () => ({ hash: "0xaccept" }) };
+    }
+    async revokeProposal(..._args: any[]) {
+      return { wait: async () => ({ hash: "0xrevoke" }) };
     }
     async fundAgreement(..._args: any[]) {
       return { wait: async () => ({ hash: "0xfund", logs: [] }) };
@@ -67,11 +76,11 @@ vi.mock("ethers", async (importOriginal) => {
     }
   }
 
-  // FakeInterface always returns AgreementCreated(id=7n) so handleCreateContract succeeds.
+  // FakeInterface always returns AgreementProposed(id=7n) so handleProposeContract succeeds.
   class FakeInterface {
     constructor(_abi: any) {}
     parseLog(_log: any) {
-      return { name: "AgreementCreated", args: { id: 7n } };
+      return { name: "AgreementProposed", args: { id: 7n } };
     }
   }
 
@@ -91,10 +100,10 @@ vi.mock("ethers", async (importOriginal) => {
   };
 });
 
-describe("handleCreateContract", () => {
+describe("handleProposeContract", () => {
   it("returns wrapped view with txHash and nextActions for Funded state", async () => {
     const ctx = makeCtx();
-    const out = await handleCreateContract(ctx, {
+    const out = await handleProposeContract(ctx, {
       payerInput: "0xPaYeR000000000000000000000000000000000001",
       payeeInput: "0xPaYeE000000000000000000000000000000000002",
       amount: "0.5",
@@ -106,7 +115,8 @@ describe("handleCreateContract", () => {
     expect(parsed.result.statusLabel).toBe("Funded");
     expect(parsed.result.amountOg).toBe("0.5");
     expect(parsed.result.txHash).toBe("0xabc");
-    expect(parsed.nextActions.join(" ")).toMatch(/Fund|release|claim|dispute/i);
+    expect(parsed.result.proposer).toBe("0xPrOpOsEr0000000000000000000000000000000003");
+    expect(parsed.nextActions.join(" ")).toMatch(/release|claim|dispute/i);
   });
 });
 
@@ -128,5 +138,22 @@ describe("handleFundContract / handleGetContract / handleListMyContracts", () =>
     const parsed = JSON.parse(await handleListMyContracts(ctx));
     expect(parsed.result).toEqual([]);
     expect(parsed.summary).toMatch(/0 contract/);
+  });
+});
+
+describe("handleAcceptContract / handleRevokeContract", () => {
+  it("accept returns updated view with txHash", async () => {
+    const ctx = makeCtx();
+    const out = await handleAcceptContract(ctx, { contractId: "1" });
+    const parsed = JSON.parse(out);
+    expect(parsed.result.id).toBe("1");
+    expect(parsed.result.txHash).toBeTruthy();
+  });
+  it("revoke returns updated view with txHash", async () => {
+    const ctx = makeCtx();
+    const out = await handleRevokeContract(ctx, { contractId: "1" });
+    const parsed = JSON.parse(out);
+    expect(parsed.result.id).toBe("1");
+    expect(parsed.result.txHash).toBeTruthy();
   });
 });

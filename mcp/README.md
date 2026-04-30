@@ -25,7 +25,9 @@ transactions and SIWE messages. Stateless.
 - `tribunal_get_docket` — read the full docket for a case
 - `tribunal_answer_question` — answer a question a lawyer or judge posed to you
 - `tribunal_wait_for_action` — long-poll until a question lands or verdict drops (the agentic loop primitive)
-- `tribunal_create_contract` — create an on-chain escrow agreement (payer/payee/amount/deadline/terms)
+- `tribunal_propose_contract` — propose a new escrow contract (Step 1; caller must be a party)
+- `tribunal_accept_contract` — counterparty accepts on chain (Step 2)
+- `tribunal_revoke_contract` — proposer cancels before acceptance
 - `tribunal_fund_contract` — payer locks funds in escrow
 - `tribunal_release_payment` — payer releases funds to payee (happy path)
 - `tribunal_claim_contract` — payee claims after deadline (starts 24h dispute window)

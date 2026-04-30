@@ -110,22 +110,34 @@ export const toolDefinitions = [
     },
   },
   {
-    name: "tribunal_create_contract",
+    name: "tribunal_propose_contract",
     description:
-      `Create an on-chain escrow contract for a payment-for-work arrangement. Use BEFORE filing a dispute when money is at stake — the escrow holds funds during work and pays out automatically based on the verdict if disputed.\n\n` +
-      `FLOW: (1) you call this to create the agreement, (2) the PAYER calls tribunal_fund_contract to lock the funds, (3) work happens off-chain, (4a) happy path: payer calls tribunal_release_payment OR payee calls tribunal_claim_contract after deadline + 24h, OR (4b) dispute path: either party calls tribunal_dispute_contract → trial → automatic settlement.\n\n` +
-      `Inputs: payer (address or *.tribunal.eth name), payee (defaults to YOU if omitted), amount in OG (e.g. "0.5"), deadline ("in 7 days" / ISO date / unix seconds), terms (free-form description of the work). Returns the contractId + nextActions.`,
+      `Step 1 of escrow flow: PROPOSE a contract. Caller must be one of the parties (payer or payee). Status starts at Proposed. The OTHER party MUST call tribunal_accept_contract before the payer can fund — this is mutual assent on chain.\n\n` +
+      `FLOW: (1) caller proposes here, (2) other party reviews terms via tribunal_get_contract and calls tribunal_accept_contract, (3) payer calls tribunal_fund_contract to lock funds, (4) work happens off-chain, (5a) payer.releasePayment OR payee.claim+grace, OR (5b) dispute → trial → auto-settle.\n\n` +
+      `Inputs: payer (address or *.tribunal.eth), payee (defaults to YOU if omitted), amount in OG, deadline ("in 7 days" / ISO / unix sec), terms (free-form description). Returns contractId + nextActions.`,
     inputSchema: {
       type: "object",
       properties: {
         payer:    { type: "string", description: "0x address or *.tribunal.eth name of who owes payment" },
         payee:    { type: "string", description: "0x address or *.tribunal.eth name of who receives payment. Defaults to caller." },
-        amount:   { type: "string", description: "Amount in OG, e.g. \"0.5\" or \"1\"" },
-        deadline: { type: "string", description: "Deadline. Examples: \"in 7 days\", \"in 24 hours\", \"2026-05-15T00:00:00Z\", or unix seconds" },
-        terms:    { type: "string", description: "Plain-text description of the work covered by the agreement" },
+        amount:   { type: "string", description: "Amount in OG, e.g. \"0.5\"" },
+        deadline: { type: "string", description: "Deadline. Examples: \"in 7 days\", \"in 24 hours\", ISO date, or unix seconds" },
+        terms:    { type: "string", description: "Plain-text description of the work covered" },
       },
       required: ["payer", "amount", "deadline", "terms"],
     },
+  },
+  {
+    name: "tribunal_accept_contract",
+    description:
+      `Step 2: ACCEPT a proposed contract. Only callable by the party that didn't propose (and only while status==Proposed). ⚠️ BEFORE calling: read the terms via tribunal_get_contract and confirm them VERBATIM with the user — acceptance is binding. After acceptance, the payer can fund.`,
+    inputSchema: { type: "object", properties: { contractId: { type: "string" } }, required: ["contractId"] },
+  },
+  {
+    name: "tribunal_revoke_contract",
+    description:
+      `Cancel your own proposal before it's accepted. Only callable by the proposer, only while status==Proposed. Useful if you got terms wrong or the counterparty is unresponsive. Status moves to Revoked (terminal).`,
+    inputSchema: { type: "object", properties: { contractId: { type: "string" } }, required: ["contractId"] },
   },
   {
     name: "tribunal_fund_contract",
@@ -336,7 +348,9 @@ export async function registerTools(req: CallToolRequest): Promise<{ content: Ar
   }
 
   if (
-    name === "tribunal_create_contract" ||
+    name === "tribunal_propose_contract" ||
+    name === "tribunal_accept_contract" ||
+    name === "tribunal_revoke_contract" ||
     name === "tribunal_fund_contract" ||
     name === "tribunal_release_payment" ||
     name === "tribunal_claim_contract" ||
@@ -376,14 +390,18 @@ export async function registerTools(req: CallToolRequest): Promise<{ content: Ar
     };
     let text: string;
     const a = (args ?? {}) as any;
-    if (name === "tribunal_create_contract")
-      text = await cm.handleCreateContract(cCtx, {
+    if (name === "tribunal_propose_contract")
+      text = await cm.handleProposeContract(cCtx, {
         payerInput: a.payer,
         payeeInput: a.payee,
         amount: a.amount,
         deadline: a.deadline,
         terms: a.terms,
       });
+    else if (name === "tribunal_accept_contract")
+      text = await cm.handleAcceptContract(cCtx, a);
+    else if (name === "tribunal_revoke_contract")
+      text = await cm.handleRevokeContract(cCtx, a);
     else if (name === "tribunal_fund_contract")
       text = await cm.handleFundContract(cCtx, a);
     else if (name === "tribunal_release_payment")

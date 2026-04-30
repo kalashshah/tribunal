@@ -2,14 +2,16 @@ import { ethers } from "ethers";
 
 const ESCROW_ABI = [
   "function nextId() view returns (uint256)",
-  "function createAgreement(address payer, address payee, uint256 amount, uint64 deadline, string termsCid) returns (uint256)",
+  "function proposeAgreement(address payer, address payee, uint256 amount, uint64 deadline, string termsCid) returns (uint256)",
+  "function acceptAgreement(uint256 id)",
+  "function revokeProposal(uint256 id)",
   "function fundAgreement(uint256 id) payable",
   "function releasePayment(uint256 id)",
   "function claimAfterDeadline(uint256 id)",
   "function finalizeClaim(uint256 id)",
   "function settleByTribunal(uint256 agreementId, uint256 caseId)",
-  "function getAgreement(uint256 id) view returns (address payer, address payee, uint256 amount, uint64 deadline, uint64 claimedAt, uint8 status, string termsCid)",
-  "event AgreementCreated(uint256 indexed id, address indexed payer, address indexed payee, uint256 amount, uint64 deadline, string termsCid)",
+  "function getAgreement(uint256 id) view returns (address payer, address payee, address proposer, uint256 amount, uint64 deadline, uint64 claimedAt, uint8 status, string termsCid)",
+  "event AgreementProposed(uint256 indexed id, address indexed proposer, address indexed payer, address payee, uint256 amount, uint64 deadline, string termsCid)",
 ];
 
 const TRIBUNAL_ABI_FILE_CASE = [
@@ -17,7 +19,7 @@ const TRIBUNAL_ABI_FILE_CASE = [
   "function BASE_FEE() view returns (uint256)",
 ];
 
-const STATUS_LABELS = ["Draft", "Funded", "Claimed", "Released", "Disputed", "Settled"];
+const STATUS_LABELS = ["Proposed", "Accepted", "Funded", "Claimed", "Released", "Disputed", "Settled", "Revoked"];
 
 export interface ContractsCtx {
   backendUrl: string;
@@ -43,6 +45,7 @@ interface AgreementView {
   id: string;
   payer: string;
   payee: string;
+  proposer: string;
   amount: string; // wei string
   amountOg: string; // human-readable OG
   deadline: number; // unix seconds
@@ -55,65 +58,63 @@ interface AgreementView {
 
 async function readAgreement(ctx: ContractsCtx, id: string): Promise<AgreementView> {
   const r = await escrowR(ctx).getAgreement(id);
-  const status = Number(r[5]);
-  const deadline = Number(r[3]);
-  const claimedAt = Number(r[4]);
+  const status = Number(r[6]);
+  const deadline = Number(r[4]);
+  const claimedAt = Number(r[5]);
   return {
     id,
     payer: r[0] as string,
     payee: r[1] as string,
-    amount: (r[2] as bigint).toString(),
-    amountOg: ethers.formatEther(r[2] as bigint),
+    proposer: r[2] as string,
+    amount: (r[3] as bigint).toString(),
+    amountOg: ethers.formatEther(r[3] as bigint),
     deadline,
     deadlineISO: new Date(deadline * 1000).toISOString(),
     claimedAt,
     status,
     statusLabel: STATUS_LABELS[status] ?? `unknown(${status})`,
-    termsCid: r[6] as string,
+    termsCid: r[7] as string,
   };
 }
 
 function nextActions(view: AgreementView, walletAddress: string): string[] {
-  const isPayer = view.payer.toLowerCase() === walletAddress.toLowerCase();
-  const isPayee = view.payee.toLowerCase() === walletAddress.toLowerCase();
+  const me = walletAddress.toLowerCase();
+  const isPayer = view.payer.toLowerCase() === me;
+  const isPayee = view.payee.toLowerCase() === me;
+  const isProposer = view.proposer.toLowerCase() === me;
   const a: string[] = [];
   switch (view.status) {
-    case 0: // Draft
-      if (isPayer)
-        a.push(
-          `Fund this contract by calling tribunal_fund_contract({contractId:"${view.id}"}). It will send ${view.amountOg} OG into escrow.`,
-        );
-      else
-        a.push(`Waiting on payer ${view.payer} to fund. They must call tribunal_fund_contract.`);
+    case 0: // Proposed
+      if (isProposer) a.push(`You proposed this contract. Waiting on the other party (${isPayer ? view.payee : view.payer}) to accept. You can call tribunal_revoke_contract({contractId:"${view.id}"}) to cancel.`);
+      else if (isPayer || isPayee) {
+        a.push(`READ THE TERMS in 'termsCid' carefully and confirm them with the user verbatim.`);
+        a.push(`If the user agrees, call tribunal_accept_contract({contractId:"${view.id}"}). Acceptance is binding — after that the payer can fund.`);
+        a.push(`If the terms are wrong, do NOT accept. Tell the user; the proposer can revoke and re-propose.`);
+      } else a.push(`Awaiting acceptance by ${isPayer ? view.payee : view.payer}.`);
       break;
-    case 1: // Funded
-      if (isPayer)
-        a.push(
-          `When work is complete and you're satisfied, call tribunal_release_payment({contractId:"${view.id}"}) to pay the payee in full. If you're unhappy with the work, call tribunal_dispute_contract.`,
-        );
-      else if (isPayee)
-        a.push(
-          `Funds are locked. After deadline ${view.deadlineISO} you may call tribunal_claim_contract; payer has 24h to dispute. If you have evidence the work is complete, you can also dispute now via tribunal_dispute_contract.`,
-        );
-      else a.push(`Funded. Awaiting release, claim, or dispute by a party.`);
+    case 1: // Accepted
+      if (isPayer) a.push(`Both parties have agreed. Lock the funds: call tribunal_fund_contract({contractId:"${view.id}"}). It will send ${view.amountOg} OG into escrow.`);
+      else a.push(`Both accepted. Waiting on payer ${view.payer} to call tribunal_fund_contract.`);
       break;
-    case 2: // Claimed
-      a.push(
-        `Payee has claimed; 24h dispute window is running. If you're the payer and disagree, call tribunal_dispute_contract NOW. Otherwise, anyone may call tribunal_finalize_claim after the window expires to release funds to payee.`,
-      );
+    case 2: // Funded
+      if (isPayer) a.push(`Funds locked. When work is complete and you're satisfied, call tribunal_release_payment({contractId:"${view.id}"}) to pay the payee. If you're unhappy, call tribunal_dispute_contract.`);
+      else if (isPayee) a.push(`Funds are locked. After deadline ${view.deadlineISO} you may call tribunal_claim_contract; payer has 24h to dispute. If you have evidence the work is complete and the payer is stalling, you can also dispute now via tribunal_dispute_contract.`);
+      else a.push(`Funded. Awaiting release, claim, or dispute.`);
       break;
-    case 3: // Released
+    case 3: // Claimed
+      a.push(`Payee has claimed; 24h dispute window is running. If you're the payer and disagree, call tribunal_dispute_contract NOW. Otherwise, anyone may call tribunal_finalize_claim after the window expires to release funds to payee.`);
+      break;
+    case 4: // Released
       a.push(`Closed (released to payee). No further action.`);
       break;
-    case 4: // Disputed
-      a.push(
-        `Tribunal case is in flight. Run tribunal_inbox + tribunal_wait_for_action to follow the trial. The runner auto-settles this escrow once verdict drops.`,
-      );
+    case 5: // Disputed
+      a.push(`Tribunal case is in flight. Run tribunal_inbox + tribunal_wait_for_action to follow the trial. The runner auto-settles this escrow once verdict drops.`);
       break;
-    case 5: // Settled
-      a.push(
-        `Settled by Tribunal verdict. Check the linked case verdict via tribunal_get_verdict for context.`,
-      );
+    case 6: // Settled
+      a.push(`Settled by Tribunal verdict. Check the linked case verdict via tribunal_get_verdict for context.`);
+      break;
+    case 7: // Revoked
+      a.push(`Revoked by proposer. Closed. Re-propose if you still want a contract.`);
       break;
   }
   return a;
@@ -159,7 +160,7 @@ function parseDeadline(input: string | number): number {
   throw new Error(`bad deadline: ${input}`);
 }
 
-export async function handleCreateContract(
+export async function handleProposeContract(
   ctx: ContractsCtx,
   args: {
     payerInput: string;
@@ -175,9 +176,8 @@ export async function handleCreateContract(
     : ctx.walletAddress;
   const amountWei = parseAmountOg(args.amount);
   const deadline = parseDeadline(args.deadline);
-  const tx = await escrowW(ctx).createAgreement(payer, payee, amountWei, deadline, args.terms);
+  const tx = await escrowW(ctx).proposeAgreement(payer, payee, amountWei, deadline, args.terms);
   const receipt = await tx.wait();
-  // Find AgreementCreated event
   const iface = new ethers.Interface(ESCROW_ABI);
   const ev = receipt!.logs
     .map((l: any) => {
@@ -187,13 +187,31 @@ export async function handleCreateContract(
         return null;
       }
     })
-    .find((e: any) => e?.name === "AgreementCreated");
-  if (!ev) throw new Error("AgreementCreated event missing");
+    .find((e: any) => e?.name === "AgreementProposed");
+  if (!ev) throw new Error("AgreementProposed event missing");
   const id = (ev.args.id as bigint).toString();
   const view = await readAgreement(ctx, id);
   return wrap(view, ctx.walletAddress, {
     txHash: receipt!.hash,
     explorerUrl: `${ctx.explorerBase}/tx/${receipt!.hash}`,
+  });
+}
+
+export async function handleAcceptContract(ctx: ContractsCtx, args: { contractId: string }): Promise<string> {
+  const tx = await escrowW(ctx).acceptAgreement(args.contractId);
+  const receipt = await tx.wait();
+  const updated = await readAgreement(ctx, args.contractId);
+  return wrap(updated, ctx.walletAddress, {
+    txHash: receipt!.hash, explorerUrl: `${ctx.explorerBase}/tx/${receipt!.hash}`,
+  });
+}
+
+export async function handleRevokeContract(ctx: ContractsCtx, args: { contractId: string }): Promise<string> {
+  const tx = await escrowW(ctx).revokeProposal(args.contractId);
+  const receipt = await tx.wait();
+  const updated = await readAgreement(ctx, args.contractId);
+  return wrap(updated, ctx.walletAddress, {
+    txHash: receipt!.hash, explorerUrl: `${ctx.explorerBase}/tx/${receipt!.hash}`,
   });
 }
 
@@ -322,6 +340,6 @@ export async function handleListMyContracts(ctx: ContractsCtx): Promise<string> 
   }
   return JSON.stringify({
     result: out,
-    summary: `${out.length} contract(s) you're involved in. For any in status Draft/Funded/Claimed, see nextActions on the individual contract via tribunal_get_contract.`,
+    summary: `${out.length} contract(s) you're involved in. For any in status Proposed/Accepted/Funded/Claimed, see nextActions on the individual contract via tribunal_get_contract.`,
   });
 }
