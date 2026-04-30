@@ -234,6 +234,9 @@ async function main() {
     llm,
     model: "demo",
   });
+  const demoBackendUrl = process.env.TRIBUNAL_BACKEND_URL ?? "http://127.0.0.1:3000";
+  const demoPartyMode = (process.env.TRIBUNAL_PARTY_MODE ?? "auto") as "human" | "auto";
+  const demoPartyAddress = { accuser: partyEns.accuser, defendant: partyEns.defendant };
   const lawyerA = createLawyer({
     side: "accuser",
     brief: accusation,
@@ -246,6 +249,9 @@ async function main() {
     llm, axl: lawyerAaxl, model: "demo",
     partyAgent: accuserPartyAgent,
     getTranscript: () => clerk.render(),
+    partyAddress: demoPartyAddress,
+    backendUrl: demoBackendUrl,
+    mode: demoPartyMode,
   });
   const lawyerB = createLawyer({
     side: "defendant",
@@ -259,6 +265,9 @@ async function main() {
     llm, axl: lawyerBaxl, model: "demo",
     partyAgent: defendantPartyAgent,
     getTranscript: () => clerk.render(),
+    partyAddress: demoPartyAddress,
+    backendUrl: demoBackendUrl,
+    mode: demoPartyMode,
   });
   const judge = createJudge({
     ensName: "judge-athena.tribunal.eth",
@@ -274,6 +283,9 @@ async function main() {
     partyEns,
     partyAgents: { accuser: accuserPartyAgent, defendant: defendantPartyAgent },
     getTranscript: () => clerk.render(),
+    partyAddress: demoPartyAddress,
+    backendUrl: demoBackendUrl,
+    mode: demoPartyMode,
   });
 
   const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));

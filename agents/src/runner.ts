@@ -40,6 +40,7 @@ import { createLawyer } from "./roles/lawyer.js";
 import { createJudge } from "./roles/judge.js";
 import { createPartyAgent } from "./roles/party.js";
 import { createZgStorage, type ZgStorage } from "./storage/og-storage.js";
+import { fetchDocket, formatDocket } from "./case/docket.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -323,6 +324,17 @@ async function main() {
       const accusationText = decodeAccusationCid(accusationCid);
       console.log(`Accusation: ${accusationText.slice(0, 120)}${accusationText.length > 120 ? "…" : ""}`);
 
+      const backendUrl = process.env.TRIBUNAL_BACKEND_URL ?? "http://127.0.0.1:3000";
+      const partyMode = (process.env.TRIBUNAL_PARTY_MODE ?? "human") as "human" | "auto";
+      const qaTimeoutMs = Number(process.env.TRIBUNAL_QA_TIMEOUT_MS ?? 5 * 60 * 1000);
+      const partyAddress = { accuser, defendant };
+
+      async function loadDocketText(): Promise<string> {
+        const items = await fetchDocket(backendUrl, key);
+        return formatDocket(items);
+      }
+      let docketText = await loadDocketText();
+
       // Per-case event log (UI reads this) + sidecar metadata file written
       // once 0G upload + on-chain anchor finish for each event.
       const eventLogPath = path.resolve(__dirname, `../../.events-${key}.jsonl`);
@@ -385,6 +397,11 @@ async function main() {
         model: picked.model,
         partyAgent: accuserPartyAgent,
         getTranscript: () => clerk.render(),
+        partyAddress,
+        backendUrl,
+        mode: partyMode,
+        qaTimeoutMs,
+        docketText,
       });
       const lawyerB = createLawyer({
         side: "defendant",
@@ -403,6 +420,11 @@ async function main() {
         model: picked.model,
         partyAgent: defendantPartyAgent,
         getTranscript: () => clerk.render(),
+        partyAddress,
+        backendUrl,
+        mode: partyMode,
+        qaTimeoutMs,
+        docketText,
       });
       const judge = createJudge({
         ensName: "judge-athena.tribunal.eth",
@@ -419,6 +441,11 @@ async function main() {
         partyEns,
         partyAgents: { accuser: accuserPartyAgent, defendant: defendantPartyAgent },
         getTranscript: () => clerk.render(),
+        partyAddress,
+        backendUrl,
+        mode: partyMode,
+        qaTimeoutMs,
+        docketText,
       });
 
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -453,6 +480,13 @@ async function main() {
       await wait(400);
       await lawyerB.closingStatement(transcriptText);
       await wait(800);
+
+      // Re-load docket so the judge sees any late-uploaded evidence. Note:
+      // lawyer/judge factories captured docketText at construction — the
+      // judge here still sees the snapshot from trial start. Acceptable for
+      // hackathon scope; a full fix recreates the judge factory here with
+      // fresh docket text.
+      docketText = await loadDocketText();
 
       console.log("--- judge clarifying question ---");
       const judgeAsked = await judge.clarifyingQuestion(clerk.render());
