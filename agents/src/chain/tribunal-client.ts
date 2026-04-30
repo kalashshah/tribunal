@@ -2,12 +2,12 @@
 /// contracts, used by clerk and judge agents. Decouples agent logic from
 /// the ethers.Contract specifics so tests can inject mocks.
 
-export interface TxLike { wait(): Promise<unknown> }
+export interface TxLike { hash?: string; wait(): Promise<unknown> }
 
 export interface TribunalContracts {
   tribunalCore: {
     recordEvent: (caseId: bigint, contentHash: `0x${string}`) => Promise<TxLike>;
-    acceptCase: (caseId: bigint, judgeIds: bigint[], threshold: bigint) => Promise<TxLike>;
+    acceptCase: (caseId: bigint, judges: string[], threshold: bigint) => Promise<TxLike>;
     submitRuling: (
       caseId: bigint,
       prevailingIsAccuser: boolean,
@@ -33,8 +33,8 @@ export interface TribunalContracts {
 }
 
 export interface TribunalClient {
-  anchorEvent(caseId: bigint, contentHash: `0x${string}`): Promise<void>;
-  acceptCase(caseId: bigint, judgeIds: bigint[], threshold: bigint): Promise<void>;
+  anchorEvent(caseId: bigint, contentHash: `0x${string}`): Promise<{ txHash: string }>;
+  acceptCase(caseId: bigint, judges: string[], threshold: bigint): Promise<void>;
   submitRuling(
     caseId: bigint,
     prevailingIsAccuser: boolean,
@@ -46,7 +46,7 @@ export interface TribunalClient {
     caseId: bigint,
     verdictLogAddress: string,
     opinionRoot: `0x${string}`,
-  ): Promise<void>;
+  ): Promise<{ txHash: string }>;
   postVerdict?(
     caseId: bigint,
     prevailingIsAccuser: boolean,
@@ -59,6 +59,7 @@ export function createTribunalClient(deps: TribunalContracts): TribunalClient {
     async anchorEvent(caseId, h) {
       const tx = await deps.tribunalCore.recordEvent(caseId, h);
       await tx.wait();
+      return { txHash: tx.hash ?? "" };
     },
     async acceptCase(caseId, judges, threshold) {
       const tx = await deps.tribunalCore.acceptCase(caseId, judges, threshold);
@@ -79,6 +80,7 @@ export function createTribunalClient(deps: TribunalContracts): TribunalClient {
     async finalizeVerdict(caseId, verdictLogAddress, opinionRoot) {
       const tx = await deps.tribunalCore.finalizeVerdict(caseId, verdictLogAddress, opinionRoot);
       await tx.wait();
+      return { txHash: tx.hash ?? "" };
     },
     postVerdict: deps.verdictLog
       ? async (caseId, prevail, root) => {

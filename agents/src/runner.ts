@@ -1,52 +1,54 @@
 /**
- * End-to-end runner: drives a single dispute through Tribunal from filing
- * to verdict. Used both as the demo script and as the hackathon smoke test.
+ * Chain-driven runner: subscribes to TribunalCore.CaseFiled and processes
+ * each filed case end-to-end.
  *
- * Pre-conditions (you set these up first):
- *   - Contracts deployed (run `cd contracts && npm run deploy:local` or :0g)
- *     so `docs/deployment.json` exists.
- *   - Four AXL nodes running locally on different ports — the runner reads
- *     each peer's API base URL from env.
- *   - .env contains OG_RPC_URL, OG_PRIVATE_KEY, ANTHROPIC_API_KEY.
+ * Pre-conditions:
+ *   - Contracts deployed (docs/deployment.json present).
+ *   - Four AXL nodes running locally (clerk + 2 lawyers + judge).
+ *   - .env contains OG_RPC_URL, OG_PRIVATE_KEY, OPENROUTER_API_KEY.
+ *   - Optional: OG_STORAGE_URL for real 0G Storage; else falls back to in-memory.
  *
- * What it does:
+ * What it does on startup:
  *   1. Loads contracts via ethers.
- *   2. Reads the four AXL peer ids and constructs senders/receivers.
- *   3. Registers four agents (accuser, defendant, judge, two lawyers) on the
- *      AgentRegistry if not already registered.
- *   4. Mints one judge iNFT.
- *   5. Opens an escrow funded with mock USDC, then files a case against it.
- *   6. Accepts the case with a single-judge panel (threshold = 1).
- *   7. Runs the trial: opening A, opening B, rebuttal A, rebuttal B,
- *      closing A, closing B.
- *   8. Judge deliberates and submits a ruling.
- *   9. Posts the verdict to VerdictLog and marks the case settled.
- *  10. Prints the on-chain status.
+ *   2. Boots AXL clients + LLM + 0G Storage.
+ *   3. Ensures the persistent agents (alice, bob, judge-athena) are registered.
+ *   4. Mints one judge iNFT (idempotent).
+ *   5. Replays past CaseFiled events that aren't yet Settled.
+ *   6. Subscribes to new CaseFiled events.
  *
- * To run:
- *   cd agents && npm run build && node dist/runner.js
+ * For each picked-up case it:
+ *   - Decodes the accusation from the cid (data URI).
+ *   - Accepts the case with the persistent judge panel (threshold = 1).
+ *   - Runs the trial: openings → rebuttals → closings → judge ruling.
+ *   - Posts the verdict via finalizeVerdict and marks settled.
+ *   - Persists per-case event log to .events-<caseId>.jsonl for the UI.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as dotenv from "dotenv";
-import { ethers, JsonRpcProvider, Wallet } from "ethers";
+import { ethers, JsonRpcProvider, NonceManager, Wallet } from "ethers";
 
 dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.env") });
 
-import { createAxlClient, subscribe, AxlClient } from "./transport/axl.js";
+import { createAxlClient, subscribe } from "./transport/axl.js";
 import { pickLlmFromEnv } from "./llm/index.js";
 import { createTribunalClient } from "./chain/tribunal-client.js";
 import { createClerk } from "./roles/clerk.js";
 import { createLawyer } from "./roles/lawyer.js";
 import { createJudge } from "./roles/judge.js";
-import type { ZgStorage } from "./storage/og-storage.js";
+import { createZgStorage, type ZgStorage } from "./storage/og-storage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 interface DeploymentJson {
-  network: string;
+  chains?: { ogGalileo?: { contracts: Record<string, string> } };
+  legacy?: Record<string, string>;
+  [k: string]: any;
+}
+
+interface ContractAddresses {
   AgentRegistry: string;
   TribunalCore: string;
   EscrowAdapter: string;
@@ -60,6 +62,19 @@ function envOrThrow(key: string): string {
   return v;
 }
 
+function loadAddresses(): ContractAddresses {
+  const p = path.resolve(__dirname, "../../docs/deployment.json");
+  const j = JSON.parse(fs.readFileSync(p, "utf8")) as DeploymentJson;
+  const c = j?.chains?.ogGalileo?.contracts ?? j?.legacy ?? j;
+  return {
+    AgentRegistry: c.AgentRegistry,
+    TribunalCore:  c.TribunalCore,
+    EscrowAdapter: c.EscrowAdapter,
+    VerdictLog:    c.VerdictLog,
+    JudgeINFT:     c.JudgeINFT,
+  };
+}
+
 function loadAbi(contractName: string): any[] {
   const p = path.resolve(
     __dirname,
@@ -68,8 +83,17 @@ function loadAbi(contractName: string): any[] {
   return JSON.parse(fs.readFileSync(p, "utf8")).abi;
 }
 
-/// In-memory storage stub for hackathon demos when 0G Storage isn't reachable.
-/// Replace with createZgStorage(...) once OG_RPC_URL + indexer URL are wired.
+async function resolveEns(addr: string): Promise<string> {
+  const url = process.env.TRIBUNAL_BACKEND_URL ?? "http://127.0.0.1:3000";
+  try {
+    const res = await fetch(`${url}/api/identity/resolve?address=${addr}`);
+    if (!res.ok) return addr;
+    const j = (await res.json()) as { ensName?: string };
+    return j.ensName ?? addr;
+  } catch { return addr; }
+}
+
+/// Fallback when OG_STORAGE_URL isn't set.
 function inMemoryStorage(): ZgStorage {
   const blobs = new Map<string, Uint8Array>();
   return {
@@ -86,74 +110,170 @@ function inMemoryStorage(): ZgStorage {
   };
 }
 
+// Galileo Flow was upgraded to `submit(((length, bytes tags, nodes), address submitter))`
+// (selector 0xbc8c11f8). The latest published 0g-ts-sdk (0.3.3) still emits the old
+// `submit((length, bytes tags, nodes))` selector (0xef3e12dc), so every upload reverts.
+// Patch Uploader.submitTransaction in place to wrap the submission with the new
+// `submitter` field and call the new selector. Once 0G ships an SDK update this
+// patch becomes a no-op and can be removed.
+function patchSdkSubmitTransaction(sdk: any): void {
+  if (sdk.Uploader.prototype.__tribunalSubmitPatched) return;
+  const NEW_FLOW_ABI = [
+    "function submit(((uint256 length, bytes tags, (bytes32 root, uint256 height)[] nodes) data, address submitter)) payable returns (uint256, bytes32, uint256, uint256)",
+    "function market() view returns (address)",
+  ];
+  const MARKET_ABI = ["function pricePerSector() view returns (uint256)"];
+  function calcFee(submission: any, pricePerSector: bigint): bigint {
+    let sectors = 0n;
+    for (const n of submission.nodes) sectors += 1n << BigInt(n.height.toString());
+    return sectors * pricePerSector;
+  }
+  sdk.Uploader.prototype.submitTransaction = async function (this: any, submission: any, opts: any) {
+    const flowAddress: string = await this.flow.getAddress();
+    const signer = this.flow.runner;
+    const submitter: string = signer.address ?? (await signer.getAddress());
+    const flowNew = new ethers.Contract(flowAddress, NEW_FLOW_ABI, signer);
+    const marketAddr: string = await flowNew.market();
+    const marketContract = new ethers.Contract(marketAddr, MARKET_ABI, this.provider);
+    const pricePerSector: bigint = await marketContract.pricePerSector();
+    const fee = (opts?.fee && BigInt(opts.fee) > 0n) ? BigInt(opts.fee) : calcFee(submission, pricePerSector);
+    let gasPrice: bigint = BigInt(this.gasPrice ?? 0);
+    if (gasPrice === 0n) {
+      const fee = await this.provider.getFeeData();
+      if (!fee.gasPrice) return [null, new Error("no suggested gasPrice")];
+      gasPrice = fee.gasPrice;
+    }
+    const txOpts: any = { value: fee, gasPrice };
+    if (opts?.nonce !== undefined) txOpts.nonce = opts.nonce;
+    if (this.gasLimit && BigInt(this.gasLimit) > 0n) txOpts.gasLimit = this.gasLimit;
+    const wrapped = { data: submission, submitter };
+    console.log("Submitting transaction with storage fee:", fee, "(patched ABI v2)");
+    try {
+      const tx = await flowNew.submit(wrapped, txOpts);
+      const receipt = await tx.wait();
+      return [receipt, null];
+    } catch (e: any) {
+      return [null, new Error("Failed to submit transaction: " + (e.message ?? e))];
+    }
+  };
+  sdk.Uploader.prototype.__tribunalSubmitPatched = true;
+}
+
+async function buildStorage(rpcUrl: string, signer: unknown): Promise<{ storage: ZgStorage; kind: "0g" | "memory" }> {
+  const indexerUrl = process.env.OG_STORAGE_URL;
+  if (!indexerUrl) return { storage: inMemoryStorage(), kind: "memory" };
+  const sdk: any = await import("@0glabs/0g-ts-sdk");
+  patchSdkSubmitTransaction(sdk);
+  const indexer = new sdk.Indexer(indexerUrl);
+  const real = createZgStorage({
+    indexer: indexer as any,
+    memDataCtor: sdk.MemData as any,
+    rpcUrl,
+    signer,
+  });
+  // Verify the patched submit works against the live Flow contract before we
+  // commit to using real storage. If anything still fails (e.g. 0G upgrades
+  // again) fall back to in-memory so the trial pipeline keeps working.
+  try {
+    await real.upload(new TextEncoder().encode("tribunal-storage-probe"));
+    return { storage: real, kind: "0g" };
+  } catch (e) {
+    console.warn("[storage] 0G upload probe failed, falling back to in-memory:", (e as Error).message?.slice(0, 200));
+    return { storage: inMemoryStorage(), kind: "memory" };
+  }
+}
+
+/// Decode an accusationCid that we wrote in the form `data:text/plain;base64,<text>`.
+/// For other cid shapes, fall back to the raw string so judges/lawyers see *something*.
+function decodeAccusationCid(cid: string): string {
+  const prefix = "data:text/plain;base64,";
+  if (cid.startsWith(prefix)) {
+    return Buffer.from(cid.slice(prefix.length), "base64").toString("utf8");
+  }
+  return cid;
+}
+
+
 async function main() {
-  const rpcUrl = envOrThrow("OG_RPC_URL");
+  const rpcUrl   = envOrThrow("OG_RPC_URL");
   const provider = new JsonRpcProvider(rpcUrl);
 
-  const deploymentPath = path.resolve(__dirname, "../../docs/deployment.json");
-  const dep = JSON.parse(fs.readFileSync(deploymentPath, "utf8")) as DeploymentJson;
-  console.log("Loaded deployment for chain", dep.network);
+  // The trial pipeline fires multiple chain writes for the operator wallet
+  // concurrently (per-event recordEvent anchors, 0G storage submits, the
+  // final finalizeVerdict). Stock ethers fetches a fresh nonce per tx from
+  // the RPC, which races: two in-flight populates read the same nonce, one
+  // wins, the rest revert with `nonce already used` or `replacement fee
+  // too low`. NonceManager allocates incrementing nonces locally so
+  // concurrent sends from the same wallet get unique slots.
+  const baseOperator = new Wallet(envOrThrow("OG_PRIVATE_KEY"), provider);
+  const operator = new NonceManager(baseOperator);
+  // The judge agent on 0G was registered with a hardhat dev key during the
+  // initial deploy; submitRuling + appendRulingMemory must be signed by
+  // *that* key, not the operator. Default keeps the deployed wiring; can be
+  // overridden via JUDGE_PRIVATE_KEY.
+  const baseJudge = new Wallet(
+    process.env.JUDGE_PRIVATE_KEY ?? "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
+    provider,
+  );
+  const judgeWallet = new NonceManager(baseJudge);
+  console.log("Operator:", baseOperator.address);
+  console.log("Judge:   ", baseJudge.address);
 
-  // Wallets — one per role. For local hardhat we use the well-known dev keys;
-  // for 0G testnet you'd derive from a single funded key + a runtime nonce
-  // strategy. Keeping it simple here.
-  const operator = new Wallet(envOrThrow("OG_PRIVATE_KEY"), provider);
-  console.log("Operator:", operator.address);
+  const addr = loadAddresses();
+  console.log("Loaded deployment:", addr.TribunalCore);
 
-  const tribunalCore = new ethers.Contract(dep.TribunalCore, loadAbi("TribunalCore"), operator);
-  const judgeINFT    = new ethers.Contract(dep.JudgeINFT,    loadAbi("JudgeINFT"),    operator);
-  const verdictLog   = new ethers.Contract(dep.VerdictLog,   loadAbi("VerdictLog"),   operator);
+  const tribunalCore = new ethers.Contract(addr.TribunalCore, loadAbi("TribunalCore"), operator);
+  const judgeINFT    = new ethers.Contract(addr.JudgeINFT,    loadAbi("JudgeINFT"),    operator);
+  const verdictLog   = new ethers.Contract(addr.VerdictLog,   loadAbi("VerdictLog"),   operator);
   const tribunal = createTribunalClient({
     tribunalCore: tribunalCore as any,
     judgeINFT:    judgeINFT    as any,
     verdictLog:   verdictLog   as any,
+  });
+  // Judge-bound contract handles for submitRuling + appendRulingMemory.
+  const tribunalCoreAsJudge = new ethers.Contract(addr.TribunalCore, loadAbi("TribunalCore"), judgeWallet);
+  const judgeINFTAsJudge    = new ethers.Contract(addr.JudgeINFT,    loadAbi("JudgeINFT"),    judgeWallet);
+  const tribunalForJudge = createTribunalClient({
+    tribunalCore: tribunalCoreAsJudge as any,
+    judgeINFT:    judgeINFTAsJudge    as any,
   });
 
   const picked = pickLlmFromEnv();
   console.log(`LLM: ${picked.provider} (${picked.model})`);
   const llm = picked.llm;
 
-  // AXL — four nodes on consecutive ports. Override via env if your config
-  // differs; defaults match the docs/protocols/axl-spike-notes.md layout.
+  // AXL singletons.
   const axlBase = process.env.AXL_BASE_URL ?? "http://127.0.0.1";
-  const clerkAxl  = createAxlClient({ baseUrl: `${axlBase}:${process.env.AXL_PORT_CLERK ?? 9002}` });
-  const lawyerAaxl= createAxlClient({ baseUrl: `${axlBase}:${process.env.AXL_PORT_LAWYER_A ?? 9012}` });
-  const lawyerBaxl= createAxlClient({ baseUrl: `${axlBase}:${process.env.AXL_PORT_LAWYER_B ?? 9022}` });
-  const judgeAxl  = createAxlClient({ baseUrl: `${axlBase}:${process.env.AXL_PORT_JUDGE ?? 9032}` });
-
+  const clerkAxl   = createAxlClient({ baseUrl: `${axlBase}:${process.env.AXL_PORT_CLERK    ?? 9002}` });
+  const lawyerAaxl = createAxlClient({ baseUrl: `${axlBase}:${process.env.AXL_PORT_LAWYER_A ?? 9012}` });
+  const lawyerBaxl = createAxlClient({ baseUrl: `${axlBase}:${process.env.AXL_PORT_LAWYER_B ?? 9022}` });
+  const judgeAxl   = createAxlClient({ baseUrl: `${axlBase}:${process.env.AXL_PORT_JUDGE    ?? 9032}` });
   const clerkPeer  = await clerkAxl.peerId();
-  const judgePeer  = await judgeAxl.peerId();
-  const lawyerAPeer= await lawyerAaxl.peerId();
-  const lawyerBPeer= await lawyerBaxl.peerId();
-  console.log({ clerkPeer, judgePeer, lawyerAPeer, lawyerBPeer });
+  console.log("Clerk peer:", clerkPeer);
 
-  // Register agents (idempotent: catches duplicate-ENS reverts).
-  async function registerOrSkip(ensName: string, role: string): Promise<bigint> {
-    try {
-      const reg = new ethers.Contract(dep.AgentRegistry, loadAbi("AgentRegistry"), operator);
-      const tx = await reg.register(ensName, role);
-      const rc = await tx.wait();
-      const ev = rc!.logs
-        .map((l: any) => { try { return reg.interface.parseLog(l); } catch { return null; } })
-        .find((e: any) => e?.name === "AgentRegistered");
-      return ev!.args.id as bigint;
-    } catch (e: any) {
-      const reg = new ethers.Contract(dep.AgentRegistry, loadAbi("AgentRegistry"), provider);
-      const id = (await reg.idByEns(ensName)) as bigint;
-      console.log(`Reused ${ensName} -> id ${id}`);
-      return id;
+  // Storage.
+  const { storage, kind: storageKind } = await buildStorage(rpcUrl, operator);
+  console.log(`Storage backend: ${storageKind}`);
+
+  const judgeAddress = baseJudge.address;
+  console.log("Judge address:", judgeAddress);
+
+  // Find the iNFT owned by the judge wallet; mint one if none exists. We
+  // don't mint blindly on every restart — that would litter the contract
+  // with new tokens and any token not owned by the judge wallet is useless
+  // because appendRulingMemory checks ownerOf().
+  let judgeTokenId: bigint | null = null;
+  const inftNext = (await judgeINFT.nextId()) as bigint;
+  for (let i = 1n; i < inftNext; i++) {
+    const owner = await judgeINFT.ownerOf(i).catch(() => null);
+    if (owner && (owner as string).toLowerCase() === baseJudge.address.toLowerCase()) {
+      judgeTokenId = i;
+      break;
     }
   }
-
-  const accuserId  = await registerOrSkip("alice.tribunal.eth",       "litigant");
-  const defendantId= await registerOrSkip("bob.tribunal.eth",         "litigant");
-  const judgeAgentId = await registerOrSkip("judge-athena.tribunal.eth", "judge");
-
-  // Mint judge iNFT (skip if one already exists owned by operator).
-  let judgeTokenId = 1n;
-  try {
-    const tx = await judgeINFT.mint(
-      operator.address,
+  if (judgeTokenId === null) {
+    const tx = await judgeINFTAsJudge.mint(
+      baseJudge.address,
       ethers.id("encryptedPersona-textualist-v1"),
       "data:application/json,judge-athena.persona",
     );
@@ -162,111 +282,214 @@ async function main() {
       .map((l: any) => { try { return judgeINFT.interface.parseLog(l); } catch { return null; } })
       .find((e: any) => e?.name === "MetadataRootUpdated");
     judgeTokenId = ev!.args.tokenId as bigint;
-    console.log(`Minted judge iNFT #${judgeTokenId}`);
-  } catch (e) {
-    console.log("Mint skipped (may already exist), using token id 1");
+    console.log(`Minted judge iNFT #${judgeTokenId} to ${baseJudge.address}`);
+  } else {
+    console.log(`Reusing judge iNFT #${judgeTokenId} (owned by ${baseJudge.address})`);
   }
 
-  // File the case (no escrow for the smoke run; pass ZeroAddress).
-  const filedTx = await tribunalCore.fileCase(
-    accuserId,
-    defendantId,
-    ethers.ZeroAddress,
-    0,
-    "ipfs://accusation-mock",
-  );
-  const filedRc = await filedTx.wait();
-  const filedEv = filedRc!.logs
-    .map((l: any) => { try { return tribunalCore.interface.parseLog(l); } catch { return null; } })
-    .find((e: any) => e?.name === "CaseFiled");
-  const caseId: bigint = filedEv!.args.caseId;
-  console.log(`Filed case #${caseId}`);
+  // ---- per-case driver ---------------------------------------------------
+  const inFlight = new Set<string>();
 
-  await tribunal.acceptCase(caseId, [judgeAgentId], 1n);
-  console.log(`Accepted case with single-judge panel`);
+  async function runCase(
+    caseId: bigint,
+    accuser: string,
+    defendant: string,
+    accusationCid: string,
+  ): Promise<void> {
+    const key = caseId.toString();
+    if (inFlight.has(key)) return;
+    inFlight.add(key);
 
-  // Set up clerk to listen on its AXL queue.
-  const storage = inMemoryStorage();
-  const clerk = createClerk({
-    caseId,
-    storage,
-    tribunal,
-    forward: (ev) => { console.log(`[clerk] seq ${ev.seq} ${ev.kind} from ${ev.from}`); },
+    try {
+      const status: bigint = await tribunalCore.caseStatus(caseId);
+      // CaseStatus enum: None=0, Filed=1, Accepted=2, Arguments=3, Deliberation=4, Ruled=5, Settled=6
+      if (status === 6n) { console.log(`Case ${key} already settled, skipping`); return; }
+
+      console.log(`\n=========== Case ${key} (status=${status}) ===========`);
+
+      const accuserEns   = await resolveEns(accuser);
+      const defendantEns = await resolveEns(defendant);
+
+      const accusationText = decodeAccusationCid(accusationCid);
+      console.log(`Accusation: ${accusationText.slice(0, 120)}${accusationText.length > 120 ? "…" : ""}`);
+
+      // Per-case event log (UI reads this) + sidecar metadata file written
+      // once 0G upload + on-chain anchor finish for each event.
+      const eventLogPath = path.resolve(__dirname, `../../.events-${key}.jsonl`);
+      const eventMetaPath = path.resolve(__dirname, `../../.events-${key}.meta.jsonl`);
+      fs.writeFileSync(eventLogPath, "");
+      fs.writeFileSync(eventMetaPath, "");
+      const clerk = createClerk({
+        caseId,
+        storage,
+        tribunal,
+        forward: (ev) => {
+          console.log(`[clerk c${key}] seq ${ev.seq} ${ev.kind} from ${ev.from}`);
+          fs.appendFileSync(eventLogPath, JSON.stringify(ev) + "\n");
+        },
+        onPersisted: (seq, info) => {
+          fs.appendFileSync(eventMetaPath, JSON.stringify({ seq, ...info }) + "\n");
+        },
+      });
+      const stopSubscribe = subscribe(clerkAxl, async (env) => {
+        const meta = (env.payload as any)?.meta;
+        if (meta && String(meta.caseId) !== key) return; // ignore other cases
+        await clerk.handleIncoming(env);
+      });
+
+      // Accept with single-judge panel if still in Filed state. acceptCase
+      // moves the case to Arguments (skipping the unused Accepted enum slot).
+      if (status === 1n) {
+        await tribunal.acceptCase(caseId, [judgeAddress], 1n);
+        console.log(`Accepted case ${key}`);
+      }
+
+      const partyEns = { accuser: accuserEns, defendant: defendantEns };
+
+      const lawyerA = createLawyer({
+        side: "accuser",
+        brief: accusationText,
+        ensName: accuserEns,
+        clientEns: accuserEns,
+        opponentEns: defendantEns,
+        partyEns,
+        clerkPeerId: clerkPeer,
+        caseId: key,
+        llm,
+        axl: lawyerAaxl,
+        model: picked.model,
+      });
+      const lawyerB = createLawyer({
+        side: "defendant",
+        brief:
+          `You are defending against the following accusation:\n${accusationText}\n\n` +
+          `Argue that the accusation is unfounded, the facts are misrepresented, ` +
+          `or the requested remedy is disproportionate. Be concrete; do not concede.`,
+        ensName: defendantEns,
+        clientEns: defendantEns,
+        opponentEns: accuserEns,
+        partyEns,
+        clerkPeerId: clerkPeer,
+        caseId: key,
+        llm,
+        axl: lawyerBaxl,
+        model: picked.model,
+      });
+      const judge = createJudge({
+        ensName: "judge-athena.tribunal.eth",
+        caseId,
+        tokenId: judgeTokenId!,
+        personaPrompt:
+          "You are a careful textualist judge. Rule on what was actually written and demonstrably true, not on what parties wished was true.",
+        priorRulings: [],
+        llm,
+        axl: judgeAxl,
+        tribunal: tribunalForJudge,
+        clerkPeerId: clerkPeer,
+        model: picked.model,
+        partyEns,
+      });
+
+      const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+      console.log("--- discovery interviews ---");
+      await lawyerA.interview();
+      await wait(400);
+      await lawyerB.interview();
+      await wait(400);
+
+      console.log("--- opening statements ---");
+      const openA = await lawyerA.openingStatement();
+      await wait(400);
+      const openB = await lawyerB.openingStatement();
+      await wait(400);
+
+      console.log("--- cross-examination ---");
+      await lawyerA.crossExamine();
+      await wait(400);
+      await lawyerB.crossExamine();
+      await wait(400);
+
+      console.log("--- rebuttals ---");
+      await lawyerA.rebuttal(openB);
+      await wait(400);
+      await lawyerB.rebuttal(openA);
+      await wait(400);
+
+      console.log("--- closings ---");
+      const transcriptText = clerk.render();
+      await lawyerA.closingStatement(transcriptText);
+      await wait(400);
+      await lawyerB.closingStatement(transcriptText);
+      await wait(800);
+
+      console.log("--- judge clarifying question ---");
+      const judgeAsked = await judge.clarifyingQuestion(clerk.render());
+      if (judgeAsked) console.log(`(judge posed a clarifying question)`);
+
+      console.log("--- judge deliberation ---");
+      const ruling = await judge.deliberateAndRule(clerk.render());
+      console.log("Verdict:", ruling.prevailingIsAccuser ? "for accuser" : "for defendant");
+
+      const opinionRoot = ethers.keccak256(ethers.toUtf8Bytes(ruling.opinion)) as `0x${string}`;
+      const finalize = await tribunal.finalizeVerdict(caseId, addr.VerdictLog, opinionRoot);
+      console.log(`Posted verdict + settled case ${key} (tx ${finalize.txHash})`);
+      const verdictMetaPath = path.resolve(__dirname, `../../.verdict-${key}.json`);
+      fs.writeFileSync(verdictMetaPath, JSON.stringify({
+        finalizeTxHash: finalize.txHash,
+        opinionRoot,
+        prevailingIsAccuser: ruling.prevailingIsAccuser,
+      }) + "\n");
+
+      stopSubscribe();
+    } catch (e) {
+      console.error(`Case ${key} failed:`, e);
+    } finally {
+      inFlight.delete(key);
+    }
+  }
+
+  // Serial queue so multiple filed cases don't trample each other on the
+  // shared AXL nodes.
+  const pending: { caseId: bigint; accuser: string; defendant: string; accusationCid: string }[] = [];
+  let draining = false;
+  async function drain() {
+    if (draining) return;
+    draining = true;
+    while (pending.length > 0) {
+      const next = pending.shift()!;
+      await runCase(next.caseId, next.accuser, next.defendant, next.accusationCid);
+    }
+    draining = false;
+  }
+  function enqueue(c: bigint, a: string, d: string, cid: string) {
+    if (inFlight.has(c.toString()) || pending.some((p) => p.caseId === c)) return;
+    pending.push({ caseId: c, accuser: a, defendant: d, accusationCid: cid });
+    drain().catch((e) => console.error("drain error:", e));
+  }
+
+  // Replay historical CaseFiled events (last ~5000 blocks) for unsettled cases.
+  const filedEvent = tribunalCore.getEvent("CaseFiled");
+  const head = await provider.getBlockNumber();
+  const fromBlock = Math.max(0, head - 5000);
+  console.log(`Replaying CaseFiled from block ${fromBlock} to ${head}…`);
+  const past = await tribunalCore.queryFilter(filedEvent, fromBlock, head);
+  for (const ev of past) {
+    // Use positional access — ABI param names changed across versions and
+    // ev.args.accuser / accuserId can disagree on replay.
+    const args = (ev as any).args as any[];
+    enqueue(args[0] as bigint, args[1] as string, args[2] as string, args[5] as string);
+  }
+
+  // Subscribe to new ones.
+  await tribunalCore.on(filedEvent, (caseId, accuser, defendant, _escrow, _escrowId, accusationCid, _fee) => {
+    console.log(`[event] CaseFiled #${caseId}`);
+    enqueue(caseId as bigint, accuser as string, defendant as string, accusationCid as string);
   });
-  const stopSubscribe = subscribe(clerkAxl, async (env) => {
-    await clerk.handleIncoming(env);
-  });
 
-  // Lawyers + judge.
-  const lawyerA = createLawyer({
-    side: "accuser",
-    brief: "Alice claims she delivered a market-research report on 2026-04-20 at 14:00 UTC; Bob disputes receipt.",
-    ensName: "lawyer-quinn.tribunal.eth",
-    clerkPeerId: clerkPeer,
-    caseId: caseId.toString(),
-    llm,
-    axl: lawyerAaxl,
-    model: "claude-sonnet-4-6",
-  });
-  const lawyerB = createLawyer({
-    side: "defendant",
-    brief: "Bob never received the report; only an empty-payload notification arrived.",
-    ensName: "lawyer-rivers.tribunal.eth",
-    clerkPeerId: clerkPeer,
-    caseId: caseId.toString(),
-    llm,
-    axl: lawyerBaxl,
-    model: "claude-sonnet-4-6",
-  });
-  const judge = createJudge({
-    ensName: "judge-athena.tribunal.eth",
-    caseId,
-    tokenId: judgeTokenId,
-    personaPrompt: "You are a careful textualist. Rule on what was actually written, not what parties wished was written.",
-    priorRulings: [],
-    llm,
-    axl: judgeAxl,
-    tribunal,
-    clerkPeerId: clerkPeer,
-    model: "claude-sonnet-4-6",
-  });
-
-  // Drive the trial. Each step waits a beat for the clerk to ingest.
-  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-  console.log("\n--- opening statements ---");
-  const openA = await lawyerA.openingStatement();
-  await wait(800);
-  const openB = await lawyerB.openingStatement();
-  await wait(800);
-
-  console.log("\n--- rebuttals ---");
-  await lawyerA.rebuttal(openB);
-  await wait(800);
-  await lawyerB.rebuttal(openA);
-  await wait(800);
-
-  console.log("\n--- closings ---");
-  const transcriptText = clerk.render();
-  await lawyerA.closingStatement(transcriptText);
-  await wait(800);
-  await lawyerB.closingStatement(transcriptText);
-  await wait(1000);
-
-  console.log("\n--- judge deliberation ---");
-  const ruling = await judge.deliberateAndRule(clerk.render());
-  console.log("Verdict:", ruling);
-
-  // Post to VerdictLog and mark settled.
-  const opinionRoot = ethers.keccak256(ethers.toUtf8Bytes(ruling.opinion)) as `0x${string}`;
-  if (tribunal.postVerdict) await tribunal.postVerdict(caseId, ruling.prevailingIsAccuser, opinionRoot);
-  await tribunal.markSettled(caseId);
-
-  const status = await tribunalCore.caseStatus(caseId);
-  const prevailing = await tribunalCore.casePrevailing(caseId);
-  console.log(`On-chain: caseStatus=${status} prevailingIsAccuser=${prevailing}`);
-
-  stopSubscribe();
+  console.log("Runner ready. Waiting for CaseFiled events…");
+  // Stay alive.
+  await new Promise(() => {});
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
