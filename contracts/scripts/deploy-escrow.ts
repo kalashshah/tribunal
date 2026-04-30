@@ -14,8 +14,8 @@ async function main() {
   const j = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
   if (!j.TribunalCore) throw new Error("deployment.json missing TribunalCore");
 
-  if (j.TribunalEscrow) {
-    console.log(`TribunalEscrow already in deployment.json: ${j.TribunalEscrow}. Aborting.`);
+  if (j.TribunalEscrow && process.env.REDEPLOY_ESCROW !== "1") {
+    console.log(`TribunalEscrow already in deployment.json: ${j.TribunalEscrow}. Set REDEPLOY_ESCROW=1 to overwrite.`);
     return;
   }
 
