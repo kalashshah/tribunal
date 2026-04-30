@@ -61,4 +61,11 @@ describe("AgentRegistry", () => {
       reg.connect(other).revoke(await judge.getAddress()),
     ).to.be.revertedWithCustomError(reg, "OwnableUnauthorizedAccount");
   });
+
+  it("reverts revoke when address has no role", async () => {
+    const { reg, owner, other } = await deployed();
+    await expect(
+      reg.connect(owner).revoke(await other.getAddress()),
+    ).to.be.revertedWith("not admitted");
+  });
 });

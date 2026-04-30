@@ -28,6 +28,7 @@ contract AgentRegistry is Ownable {
 
     function revoke(address who) external onlyOwner {
         Role prev = roleOf[who];
+        require(prev != Role.None, "not admitted");
         roleOf[who] = Role.None;
         emit RoleRevoked(who, prev);
     }
