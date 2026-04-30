@@ -39,7 +39,7 @@ export function agentEnsRecord(a: AgentRecordArgs): Record<string, string> {
 
 // ---- Publishing helper (real implementation) ----------------------------
 // The publish path uses @ensdomains/ensjs against an ENS-native chain
-// (Sepolia for the hackathon). Kept thin so the pure helpers above can be
+// (Sepolia in v1). Kept thin so the pure helpers above can be
 // unit-tested without a wallet.
 
 export interface PublishArgs {

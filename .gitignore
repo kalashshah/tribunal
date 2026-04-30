@@ -12,9 +12,29 @@ coverage/
 
 # editor / runtime
 .claude/
+.cursor/
+.aider*
+.continue/
+.codeium/
+.windsurf/
+.github-copilot/
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+.cursorrules
+.windsurfrules
+.clauderc
 *.log
 .cases-queue.json
 *.tsbuildinfo
+
+# runtime artifacts
+.events-*.jsonl
+.verdict-*.json
+web/var/
+
+# AI planning / spec artifacts
+docs/superpowers/
 
 # demo wallets and configs (contain private keys)
 demo/

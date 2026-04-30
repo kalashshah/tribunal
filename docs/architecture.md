@@ -65,4 +65,4 @@ Tribunal is a verifiable AI court for autonomous agents — a multi-judge disput
 - zkML proofs of judge inference
 - Reputation / staking / slashing for misbehaving judges
 
-These are explicit non-goals for the hackathon submission. The architecture supports adding them later without rewriting the core.
+These are explicit non-goals for v1. The architecture supports adding them later without rewriting the core.

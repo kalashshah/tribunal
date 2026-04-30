@@ -5,29 +5,25 @@
 > lawyer agents argue over Gensyn AXL, and a panel of ERC-7857 judge iNFTs
 > rules — with every prompt, argument, and verdict anchored on 0G Chain.
 
-Hackathon project for **ETHGlobal Open Agents (April 2026)**.
-
 ```bash
 npm install && npm run demo
 ```
 
 That runs a full case end-to-end on a local hardhat node — boots the chain, deploys all five contracts, mints a judge iNFT, files a dispute, runs the trial (mocked LLM, in-memory AXL bus, in-memory 0G Storage), and asserts the on-chain state. **No external services or API keys required.**
 
-- **Spec:** [`docs/superpowers/specs/2026-04-26-tribunal-design.md`](docs/superpowers/specs/2026-04-26-tribunal-design.md)
-- **Implementation plan:** [`docs/superpowers/plans/2026-04-26-tribunal.md`](docs/superpowers/plans/2026-04-26-tribunal.md)
 - **Architecture diagram:** [`docs/architecture.md`](docs/architecture.md)
-- **Demo video script:** [`docs/demo-script.md`](docs/demo-script.md)
+- **Live deployments:** [`docs/deployments.md`](docs/deployments.md)
 
-## Sponsor tracks targeted
+## Built on
 
-| Sponsor       | Track                                          | Where it lives                                                                |
+| Layer         | Component                                      | Where it lives                                                                |
 |---------------|------------------------------------------------|-------------------------------------------------------------------------------|
-| **0G**        | Track B: Autonomous Agents & iNFT Innovations  | `contracts/src/JudgeINFT.sol` (ERC-7857), `agents/src/storage/og-storage.ts`  |
-| **Gensyn**    | AXL                                            | `agents/src/transport/axl.ts`, `agents/src/runner.ts`                         |
-| **ENS**       | Track A (Identity) + Track B (Creative)        | `agents/src/identity/ens.ts`, `scripts/publish-ens-records.ts`                |
-| **KeeperHub** | Best Use of KeeperHub                          | `keeper/workflows/`                                                           |
+| **0G Chain**  | Settlement chain + iNFT (ERC-7857) judges      | `contracts/src/JudgeINFT.sol`, `agents/src/storage/og-storage.ts`             |
+| **Gensyn AXL**| Encrypted P2P transport between agents         | `agents/src/transport/axl.ts`, `agents/src/runner.ts`                         |
+| **ENS**       | Agent identity (ENSIP-25) + credentials        | `agents/src/identity/ens.ts`, `scripts/publish-ens-records.ts`                |
+| **KeeperHub** | No-code execution of rulings                   | `keeper/workflows/`                                                           |
 
-Uniswap is intentionally not in scope — settlement is direct ERC-20 transfer; forcing a swap would be track-chasing.
+Settlement is direct ERC-20 transfer; no AMM swap is involved.
 
 ## Repo layout
 
@@ -80,7 +76,7 @@ npm run dev
 # open http://localhost:3000
 ```
 
-## Quickstart for graders
+## Quickstart
 
 1. `cp .env.example .env` and fill `OG_PRIVATE_KEY`, `OG_RPC_URL`, `ANTHROPIC_API_KEY`, and MCP-specific vars (see `mcp/README.md`).
 2. `cd contracts && npm install && npm run deploy:0g` — deploys the five contracts, writes addresses to `docs/deployment.json`.
@@ -99,9 +95,7 @@ demo:      5/5       (end-to-end against local hardhat)
 
 ## Acknowledgements
 
-Built solo for ETHGlobal Open Agents in 10 days. Thanks to:
-
-- [0G Labs](https://0g.ai) for the iNFT (ERC-7857) primitive and the storage layer.
-- [Gensyn](https://gensyn.ai) for AXL — encrypted P2P that *just works* over localhost.
-- [ENS](https://ens.domains) for ENSIP-25 (verifiable AI agent identity).
-- [KeeperHub](https://keeperhub.com) for the no-code execution layer.
+- [0G Labs](https://0g.ai) — iNFT (ERC-7857) primitive and the storage layer.
+- [Gensyn](https://gensyn.ai) — AXL encrypted P2P transport.
+- [ENS](https://ens.domains) — ENSIP-25 verifiable AI agent identity.
+- [KeeperHub](https://keeperhub.com) — no-code execution layer.

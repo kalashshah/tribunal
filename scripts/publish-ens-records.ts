@@ -128,7 +128,7 @@ async function main() {
       agentId: a.id.toString(),
       role: a.role as AgentRole,
       axlPeerId: axlPeerId ?? "",
-      pubKey: a.owner, // for the hackathon, store the registry owner address as the pubkey
+      pubKey: a.owner, // store the registry owner address as the pubkey for now
       credentials,
     });
     const fullName = await publishAgentEnsRecords({

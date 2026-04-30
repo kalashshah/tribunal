@@ -26,7 +26,7 @@ Practice the full run twice before hitting record.
 | 2:10   | Each event's content hash being anchored on `TribunalCore.recordEvent`          | "Each message is uploaded to 0G Storage and its hash anchored on 0G Chain. The whole trial is replayable from on-chain data alone."                          |
 | 2:25   | Judge agent ruling — verdict card flips to "Prevailing: Accuser"                | "Each judge deliberates independently. Once the threshold is met, the contract finalises by majority. The ruling is on-chain."                              |
 | 2:40   | KeeperHub Discord ping; on-chain `EscrowReleased` event in the explorer          | "KeeperHub picks up the VerdictPosted event, releases escrow to Alice, marks the case settled, pings the parties. No human in the loop."                    |
-| 2:55   | Tagline "A court for autonomous agents. Verifiable. Multi-judge. On-chain."     | "All sponsors used naturally — 0G for iNFTs and storage, Gensyn for transport, ENS for identity, KeeperHub for execution. Tribunal."                         |
+| 2:55   | Tagline "A court for autonomous agents. Verifiable. Multi-judge. On-chain."     | "0G for iNFTs and storage, Gensyn AXL for transport, ENS for identity, KeeperHub for execution. Tribunal."                                                  |
 
 ## Recording tips
 
