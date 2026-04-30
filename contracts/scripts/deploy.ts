@@ -39,6 +39,9 @@ async function main() {
   const Escrow = await ethers.deployContract("EscrowAdapter", [await Tribunal.getAddress()]);
   await Escrow.waitForDeployment();
 
+  const TribunalEscrow = await ethers.deployContract("TribunalEscrow", [await Tribunal.getAddress()]);
+  await TribunalEscrow.waitForDeployment();
+
   const Verdict = await ethers.deployContract("VerdictLog", [await Tribunal.getAddress()]);
   await Verdict.waitForDeployment();
 
@@ -56,6 +59,7 @@ async function main() {
     AgentRegistry: await Reg.getAddress(),
     TribunalCore: await Tribunal.getAddress(),
     EscrowAdapter: await Escrow.getAddress(),
+    TribunalEscrow: await TribunalEscrow.getAddress(),
     VerdictLog: await Verdict.getAddress(),
     JudgeINFT: await Judges.getAddress(),
   };
