@@ -2,45 +2,63 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 
 describe("AgentRegistry", () => {
-  it("registers an agent and emits AgentRegistered with sequential id", async () => {
-    const [, alice] = await ethers.getSigners();
-    const reg = await (await ethers.getContractFactory("AgentRegistry")).deploy();
+  async function deployed() {
+    const [owner, judge, lawyer, other] = await ethers.getSigners();
+    const reg = await (await ethers.getContractFactory("AgentRegistry"))
+      .connect(owner).deploy();
     await reg.waitForDeployment();
+    return { reg, owner, judge, lawyer, other };
+  }
 
-    const tx = await reg.connect(alice).register("alice.tribunal.eth", "judge");
-    const rc = await tx.wait();
-    const ev = rc!.logs
-      .map((l) => {
-        try { return reg.interface.parseLog(l as any); } catch { return null; }
-      })
-      .find((e) => e?.name === "AgentRegistered");
-    expect(ev).to.exist;
-    expect(ev!.args.id).to.equal(1n);
-    expect(ev!.args.owner).to.equal(await alice.getAddress());
-    expect(ev!.args.ensName).to.equal("alice.tribunal.eth");
-    expect(ev!.args.role).to.equal("judge");
+  it("defaults to roleOf == None for unknown addresses", async () => {
+    const { reg, other } = await deployed();
+    expect(await reg.roleOf(await other.getAddress())).to.equal(0n);
   });
 
-  it("rejects re-registration of the same ENS name", async () => {
-    const [, a, b] = await ethers.getSigners();
-    const reg = await (await ethers.getContractFactory("AgentRegistry")).deploy();
-    await reg.connect(a).register("alice.tribunal.eth", "judge");
+  it("admits a judge and emits RoleAdmitted", async () => {
+    const { reg, owner, judge } = await deployed();
+    const addr = await judge.getAddress();
+    await expect(reg.connect(owner).admitJudge(addr))
+      .to.emit(reg, "RoleAdmitted").withArgs(addr, 2n); // Role.Judge = 2
+    expect(await reg.roleOf(addr)).to.equal(2n);
+  });
+
+  it("admits a lawyer and emits RoleAdmitted", async () => {
+    const { reg, owner, lawyer } = await deployed();
+    const addr = await lawyer.getAddress();
+    await expect(reg.connect(owner).admitLawyer(addr))
+      .to.emit(reg, "RoleAdmitted").withArgs(addr, 1n); // Role.Lawyer = 1
+    expect(await reg.roleOf(addr)).to.equal(1n);
+  });
+
+  it("rejects admitJudge from non-owner", async () => {
+    const { reg, judge, other } = await deployed();
     await expect(
-      reg.connect(b).register("alice.tribunal.eth", "lawyer"),
-    ).to.be.revertedWith("ENS taken");
+      reg.connect(other).admitJudge(await judge.getAddress()),
+    ).to.be.revertedWithCustomError(reg, "OwnableUnauthorizedAccount");
   });
 
-  it("rejects empty ENS name", async () => {
-    const [, a] = await ethers.getSigners();
-    const reg = await (await ethers.getContractFactory("AgentRegistry")).deploy();
-    await expect(reg.connect(a).register("", "judge")).to.be.revertedWith("empty ens");
+  it("rejects admitLawyer from non-owner", async () => {
+    const { reg, lawyer, other } = await deployed();
+    await expect(
+      reg.connect(other).admitLawyer(await lawyer.getAddress()),
+    ).to.be.revertedWithCustomError(reg, "OwnableUnauthorizedAccount");
   });
 
-  it("only owner can deactivate", async () => {
-    const [, a, b] = await ethers.getSigners();
-    const reg = await (await ethers.getContractFactory("AgentRegistry")).deploy();
-    await reg.connect(a).register("alice.tribunal.eth", "judge");
-    await expect(reg.connect(b).deactivate(1)).to.be.revertedWith("not owner");
-    await expect(reg.connect(a).deactivate(1)).to.emit(reg, "AgentDeactivated").withArgs(1);
+  it("revokes a role and emits RoleRevoked with previous value", async () => {
+    const { reg, owner, judge } = await deployed();
+    const addr = await judge.getAddress();
+    await reg.connect(owner).admitJudge(addr);
+    await expect(reg.connect(owner).revoke(addr))
+      .to.emit(reg, "RoleRevoked").withArgs(addr, 2n); // previous Judge
+    expect(await reg.roleOf(addr)).to.equal(0n);
+  });
+
+  it("rejects revoke from non-owner", async () => {
+    const { reg, owner, judge, other } = await deployed();
+    await reg.connect(owner).admitJudge(await judge.getAddress());
+    await expect(
+      reg.connect(other).revoke(await judge.getAddress()),
+    ).to.be.revertedWithCustomError(reg, "OwnableUnauthorizedAccount");
   });
 });
