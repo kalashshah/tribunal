@@ -116,3 +116,49 @@ export async function POST(req: Request) {
     explorerUrl: `${explorerBase}/tx/${receipt.hash}`,
   });
 }
+
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const party = url.searchParams.get("party")?.toLowerCase();
+  const status = url.searchParams.get("status");
+
+  const addr = loadAddresses();
+  if (!addr) return NextResponse.json({ error: "deployment not found" }, { status: 503 });
+  const rpcUrl = process.env.OG_RPC_URL;
+  if (!rpcUrl) return NextResponse.json({ error: "OG_RPC_URL not set" }, { status: 503 });
+
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const tribunal = new ethers.Contract(
+    addr.TribunalCore,
+    [
+      ...TRIBUNAL_ABI,
+      "function caseStatus(uint256) view returns (uint8)",
+      "function nextCaseId() view returns (uint256)",
+      "function caseAccuser(uint256) view returns (address)",
+      "function caseDefendant(uint256) view returns (address)",
+    ],
+    provider,
+  );
+
+  const next = (await tribunal.nextCaseId()) as bigint;
+  const ids: bigint[] = [];
+  for (let i = 1n; i < next; i++) ids.push(i);
+
+  const out: Array<Record<string, any>> = [];
+  for (const id of ids) {
+    const [s, accuser, defendant] = await Promise.all([
+      tribunal.caseStatus(id),
+      tribunal.caseAccuser(id),
+      tribunal.caseDefendant(id),
+    ]);
+    if (party && (party !== (accuser as string).toLowerCase()) && (party !== (defendant as string).toLowerCase())) continue;
+    if (status !== null && status !== undefined && Number(s) !== Number(status)) continue;
+    out.push({
+      caseId: id.toString(),
+      status: Number(s),
+      accuser,
+      defendant,
+    });
+  }
+  return NextResponse.json({ cases: out });
+}
