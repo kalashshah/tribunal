@@ -46,6 +46,50 @@ export const toolDefinitions = [
     description: "Fetch ruling and reasoning for a settled case.",
     inputSchema: { type: "object", properties: { caseId: { type: "string" } }, required: ["caseId"] },
   },
+  {
+    name: "tribunal_submit_evidence",
+    description: "Append an evidence item to the case docket. Use BEFORE the trial starts; lawyers and judges read from this docket.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        caseId: { type: "string" },
+        body:   { type: "string", description: "Plain-text evidence: facts, dates, names, contract clauses, etc." },
+        url:    { type: "string", description: "Optional supporting link (tx explorer, git commit, screenshot URL)." },
+      },
+      required: ["caseId", "body"],
+    },
+  },
+  {
+    name: "tribunal_get_docket",
+    description: "Fetch all evidence items for a case.",
+    inputSchema: { type: "object", properties: { caseId: { type: "string" } }, required: ["caseId"] },
+  },
+  {
+    name: "tribunal_answer_question",
+    description: "Answer a question posed to you (the agent) by a lawyer or judge during the trial.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        caseId:     { type: "string" },
+        questionId: { type: "string" },
+        answer:     { type: "string" },
+      },
+      required: ["caseId", "questionId", "answer"],
+    },
+  },
+  {
+    name: "tribunal_inbox",
+    description: "List open cases involving this agent and any pending questions to answer.",
+    inputSchema: {
+      type: "object",
+      properties: { role: { type: "string", enum: ["accuser", "defendant", "any"] } },
+    },
+  },
+  {
+    name: "tribunal_my_cases",
+    description: "Alias for tribunal_inbox with role=any.",
+    inputSchema: { type: "object", properties: {} },
+  },
 ] as const;
 
 export async function registerTools(req: CallToolRequest): Promise<{ content: Array<{ type: "text"; text: string }> }> {
@@ -154,6 +198,35 @@ export async function registerTools(req: CallToolRequest): Promise<{ content: Ar
     const id = (args as any).caseId as string;
     const r = await fetch(`${cfg.backendUrl}/api/cases/${encodeURIComponent(id)}/verdict`);
     return { content: [{ type: "text", text: await r.text() }] };
+  }
+
+  if (
+    name === "tribunal_submit_evidence" ||
+    name === "tribunal_get_docket" ||
+    name === "tribunal_answer_question" ||
+    name === "tribunal_inbox" ||
+    name === "tribunal_my_cases"
+  ) {
+    const { createChainContext } = await import("./signer.js");
+    const ctx = createChainContext(cfg);
+    const ev = await import("./tools-evidence.js");
+    const evidenceCtx = {
+      backendUrl: cfg.backendUrl,
+      walletAddress: ctx.wallet.address,
+      signMessage: (m: string) => ctx.wallet.signMessage(m),
+    };
+    let text: string;
+    if (name === "tribunal_submit_evidence")
+      text = await ev.handleSubmitEvidence(evidenceCtx, args as any);
+    else if (name === "tribunal_get_docket")
+      text = await ev.handleGetDocket(evidenceCtx, args as any);
+    else if (name === "tribunal_answer_question")
+      text = await ev.handleAnswerQuestion(evidenceCtx, args as any);
+    else if (name === "tribunal_inbox")
+      text = await ev.handleInbox(evidenceCtx, (args ?? {}) as any);
+    else
+      text = await ev.handleMyCases(evidenceCtx);
+    return { content: [{ type: "text", text }] };
   }
 
   throw new Error(`Unknown tool: ${name}`);
