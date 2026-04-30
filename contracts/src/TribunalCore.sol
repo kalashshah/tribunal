@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ITribunal } from "./interfaces/ITribunal.sol";
 
 interface IRegistry {
-    function agents(uint256) external view returns (address owner, string memory ens, string memory role, bool active);
+    enum Role { None, Lawyer, Judge }
+    function roleOf(address) external view returns (Role);
 }
 
 interface IEscrow {
@@ -16,21 +18,24 @@ interface IVerdictLog {
 }
 
 /// @title TribunalCore
-/// @notice Case state machine for AI-agent dispute resolution. Holds anchor
-///         hashes of every event in a case and tallies multi-judge rulings.
-contract TribunalCore is ITribunal {
+/// @notice Case state machine. Address-keyed parties, payable fileCase with
+///         BASE_FEE, role-gated argument and ruling submission.
+contract TribunalCore is ITribunal, Ownable {
     IRegistry public immutable registry;
     address public immutable runner; // operator that anchors events; restricted in MVP
 
+    uint256 public constant BASE_FEE = 0.01 ether;
+    uint256 public feesAccrued;
+
     struct Case {
         CaseStatus status;
-        uint256 accuserId;
-        uint256 defendantId;
+        address accuser;
+        address defendant;
         address escrowAdapter;
         uint256 escrowId;
-        uint256[] judges;
+        address[] judges;
         uint256 threshold;
-        uint256 yes; // votes for accuser-prevailing
+        uint256 yes;
         uint256 no;
         uint256 nextSeq;
         bool    prevailingIsAccuser;
@@ -38,9 +43,9 @@ contract TribunalCore is ITribunal {
 
     uint256 public nextCaseId = 1;
     mapping(uint256 => Case) private cases;
-    mapping(uint256 => mapping(uint256 => bool)) public hasRuled; // caseId => agentId => bool
+    mapping(uint256 => mapping(address => bool)) public hasRuled;
 
-    constructor(address registry_) {
+    constructor(address registry_) Ownable(msg.sender) {
         require(registry_ != address(0), "zero registry");
         registry = IRegistry(registry_);
         runner = msg.sender;
@@ -49,34 +54,36 @@ contract TribunalCore is ITribunal {
     modifier onlyRunner() { require(msg.sender == runner, "not runner"); _; }
 
     function fileCase(
-        uint256 accuserAgentId,
-        uint256 defendantAgentId,
+        address defendant,
         address escrowAdapter,
         uint256 escrowId,
         string calldata accusationCid
-    ) external override returns (uint256 id) {
-        (address aOwner,,,) = registry.agents(accuserAgentId);
-        require(aOwner == msg.sender, "not accuser");
+    ) external payable override returns (uint256 id) {
+        require(msg.value >= BASE_FEE, "fee");
+        feesAccrued += msg.value;
 
         id = nextCaseId++;
         Case storage c = cases[id];
         c.status = CaseStatus.Filed;
-        c.accuserId = accuserAgentId;
-        c.defendantId = defendantAgentId;
+        c.accuser = msg.sender;
+        c.defendant = defendant;
         c.escrowAdapter = escrowAdapter;
         c.escrowId = escrowId;
         if (escrowAdapter != address(0)) IEscrow(escrowAdapter).flagDisputed(escrowId);
-        emit CaseFiled(id, accuserAgentId, defendantAgentId, escrowAdapter, escrowId, accusationCid);
+        emit CaseFiled(id, msg.sender, defendant, escrowAdapter, escrowId, accusationCid, msg.value);
     }
 
-    function acceptCase(uint256 id, uint256[] calldata judgeIds, uint256 threshold) external onlyRunner {
+    function acceptCase(uint256 id, address[] calldata judges, uint256 threshold) external onlyOwner {
         Case storage c = cases[id];
         require(c.status == CaseStatus.Filed, "bad state");
-        require(judgeIds.length > 0 && threshold > 0 && threshold <= judgeIds.length, "bad panel");
-        c.judges = judgeIds;
+        require(judges.length > 0 && threshold > 0 && threshold <= judges.length, "bad panel");
+        for (uint256 i = 0; i < judges.length; i++) {
+            require(registry.roleOf(judges[i]) == IRegistry.Role.Judge, "not a judge");
+        }
+        c.judges = judges;
         c.threshold = threshold;
         c.status = CaseStatus.Arguments;
-        emit CaseAccepted(id, judgeIds);
+        emit CaseAccepted(id, judges);
     }
 
     function recordEvent(uint256 id, bytes32 contentHash) external onlyRunner {
@@ -90,17 +97,17 @@ contract TribunalCore is ITribunal {
         Case storage c = cases[id];
         require(c.status == CaseStatus.Arguments || c.status == CaseStatus.Deliberation, "bad state");
 
-        uint256 judgeId = 0;
+        bool onPanel = false;
         for (uint256 i = 0; i < c.judges.length; i++) {
-            (address jOwner,,,) = registry.agents(c.judges[i]);
-            if (jOwner == msg.sender) { judgeId = c.judges[i]; break; }
+            if (c.judges[i] == msg.sender) { onPanel = true; break; }
         }
-        require(judgeId != 0, "not a judge for this case");
-        require(!hasRuled[id][judgeId], "double vote");
-        hasRuled[id][judgeId] = true;
+        require(onPanel, "not a panel judge");
+        require(registry.roleOf(msg.sender) == IRegistry.Role.Judge, "not a judge");
+        require(!hasRuled[id][msg.sender], "double vote");
+        hasRuled[id][msg.sender] = true;
 
         if (prevailingIsAccuser) c.yes += 1; else c.no += 1;
-        emit RulingSubmitted(id, judgeId, prevailingIsAccuser, opinionHash);
+        emit RulingSubmitted(id, msg.sender, prevailingIsAccuser, opinionHash);
 
         if (c.yes >= c.threshold || c.no >= c.threshold) {
             c.status = CaseStatus.Ruled;
@@ -115,9 +122,6 @@ contract TribunalCore is ITribunal {
         c.status = CaseStatus.Settled;
     }
 
-    /// Convenience: post the verdict to VerdictLog and mark the case
-    /// settled in one tx. Lets the runner finalise without VerdictLog
-    /// trusting the runner directly.
     function finalizeVerdict(uint256 id, address verdictLog, bytes32 opinionRoot) external onlyRunner {
         Case storage c = cases[id];
         require(c.status == CaseStatus.Ruled, "not ruled");
@@ -125,13 +129,20 @@ contract TribunalCore is ITribunal {
         c.status = CaseStatus.Settled;
     }
 
+    function withdrawFees(address payable to) external onlyOwner {
+        uint256 amount = feesAccrued;
+        feesAccrued = 0;
+        (bool ok, ) = to.call{ value: amount }("");
+        require(ok, "transfer failed");
+    }
+
     // ---- views ----
     function caseStatus(uint256 id) external view returns (CaseStatus) { return cases[id].status; }
-    function caseJudges(uint256 id) external view returns (uint256[] memory) { return cases[id].judges; }
+    function caseJudges(uint256 id) external view returns (address[] memory) { return cases[id].judges; }
     function caseThreshold(uint256 id) external view returns (uint256) { return cases[id].threshold; }
     function casePrevailing(uint256 id) external view returns (bool) { return cases[id].prevailingIsAccuser; }
-    function caseAccuser(uint256 id) external view returns (uint256) { return cases[id].accuserId; }
-    function caseDefendant(uint256 id) external view returns (uint256) { return cases[id].defendantId; }
+    function caseAccuser(uint256 id) external view returns (address) { return cases[id].accuser; }
+    function caseDefendant(uint256 id) external view returns (address) { return cases[id].defendant; }
     function caseEscrow(uint256 id) external view returns (address, uint256) {
         return (cases[id].escrowAdapter, cases[id].escrowId);
     }
