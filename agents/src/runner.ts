@@ -56,6 +56,7 @@ interface ContractAddresses {
   EscrowAdapter: string;
   VerdictLog: string;
   JudgeINFT: string;
+  TribunalEscrow?: string;
 }
 
 function envOrThrow(key: string): string {
@@ -74,6 +75,7 @@ function loadAddresses(): ContractAddresses {
     EscrowAdapter: c.EscrowAdapter,
     VerdictLog:    c.VerdictLog,
     JudgeINFT:     c.JudgeINFT,
+    ...(c.TribunalEscrow ? { TribunalEscrow: c.TribunalEscrow } as { TribunalEscrow: string } : {}),
   };
 }
 
@@ -505,6 +507,25 @@ async function main() {
         opinionRoot,
         prevailingIsAccuser: ruling.prevailingIsAccuser,
       }) + "\n");
+
+      // Auto-settle the linked TribunalEscrow (if any) so funds move on the
+      // same trial run. The settle call is permissionless on-chain — anyone
+      // can poke it — so this is just a convenience.
+      if (addr.TribunalEscrow) {
+        try {
+          const escAdapter = (await tribunalCore.caseEscrowAdapter(caseId)) as string;
+          const escId      = (await tribunalCore.caseEscrowId(caseId))      as bigint;
+          if (escAdapter && escAdapter.toLowerCase() === addr.TribunalEscrow.toLowerCase() && escId !== 0n) {
+            const escAbi = ["function settleByTribunal(uint256 agreementId, uint256 caseId)"];
+            const escContract = new ethers.Contract(addr.TribunalEscrow, escAbi, operator);
+            const tx = await escContract.settleByTribunal(escId, caseId);
+            const rc = await tx.wait();
+            console.log(`[escrow c${key}] settled agreement ${escId} (tx ${rc!.hash})`);
+          }
+        } catch (e) {
+          console.warn(`[escrow c${key}] auto-settle failed (non-fatal):`, (e as Error).message?.slice(0, 200));
+        }
+      }
 
       stopSubscribe();
     } catch (e) {
