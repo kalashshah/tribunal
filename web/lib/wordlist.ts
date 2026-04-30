@@ -1,0 +1,92 @@
+import { keccak256, toUtf8Bytes } from "ethers";
+
+export const ADJECTIVES: string[] = [
+  "ancient", "amber", "ample", "agile", "ardent", "astral", "azure",
+  "blazing", "bold", "brave", "bright", "broad", "brisk", "bronze",
+  "calm", "candid", "cardinal", "cerulean", "chief", "clear", "clever",
+  "cobalt", "cosmic", "crisp", "crystal", "curious", "cyan",
+  "daring", "dark", "deep", "devoted", "diligent", "distant", "divine",
+  "eager", "earnest", "elder", "elegant", "emerald", "endless", "epic",
+  "eternal", "even", "exact", "fair", "faithful", "fearless", "fierce",
+  "fine", "firm", "fleet", "fluid", "fond", "free", "fresh", "frosty",
+  "gentle", "gifted", "gilded", "glacial", "glad", "glowing", "golden",
+  "grand", "grateful", "grave", "great", "green", "grey", "grim",
+  "hallowed", "hardy", "harmonious", "hidden", "high", "hollow", "honest",
+  "hopeful", "humble", "hushed", "icy", "idle", "immense", "indigo",
+  "inland", "inner", "iron", "jade", "just", "keen", "kind", "knightly",
+  "lasting", "lavender", "lean", "light", "lively", "lone", "long",
+  "loyal", "lucid", "lunar", "luminous", "lush", "magnetic", "majestic",
+  "marble", "mellow", "mighty", "misty", "muted", "mystic", "narrow",
+  "noble", "nordic", "northern", "novel", "ochre", "odd", "open",
+  "opaque", "orange", "orderly", "pale", "patient", "peaceful", "pearlescent",
+  "persistent", "plain", "placid", "polished", "primal", "pristine", "proud",
+  "pure", "quiet", "radiant", "rapid", "rare", "raw", "regal", "remote",
+  "resolute", "restful", "rich", "rigid", "risen", "robust", "rosy",
+  "rough", "round", "royal", "rugged", "rustic", "sacred", "sapphire",
+  "scarlet", "serene", "sharp", "shining", "silent", "silver", "simple",
+  "sincere", "slender", "slow", "solar", "solemn", "solid", "somber",
+  "sonic", "south", "sparse", "spectral", "sterling", "still", "stoic",
+  "stone", "strong", "subtle", "sunlit", "supple", "sure", "swift",
+  "tall", "teal", "tender", "terse", "thin", "tidal", "timeless",
+  "tireless", "tranquil", "true", "twilight", "ultimate", "umbral",
+  "unbound", "undying", "upright", "vast", "verdant", "vibrant", "vigilant",
+  "violet", "vivid", "warm", "wary", "watchful", "wide", "wild",
+  "windy", "wise", "worthy", "young", "zealous", "zestful",
+  // additional to ensure ≥200
+  "active", "aerial", "ageless", "alabaster", "alert", "aloft", "aloof",
+  "apex", "arch", "arcane", "arduous", "arid", "ashen", "assured",
+  "attentive", "austere", "balanced", "barefoot", "bathed", "benign",
+  "bladed", "blended", "blissful", "blooming", "boundless", "breezy",
+  "brilliant", "burnished", "capable", "carved", "celestial", "centered",
+  "certain", "charged", "charming", "chiseled", "chosen", "cinder",
+];
+
+export const NOUNS: string[] = [
+  "albatross", "anchor", "anvil", "apple", "arc", "archer", "arrow",
+  "ash", "atlas", "aura", "aurora", "axe", "badger", "bark", "beacon",
+  "bear", "beaver", "birch", "bird", "blade", "bloom", "boar", "boulder",
+  "branch", "brook", "buck", "burl", "candle", "canyon", "cape", "carp",
+  "cedar", "chalk", "chimney", "cinder", "circuit", "citadel", "cliff",
+  "cloak", "cloud", "clover", "coal", "comet", "compass", "condor",
+  "coral", "cove", "crane", "crater", "creek", "crest", "crow", "crown",
+  "crystal", "current", "cypress", "dawn", "deer", "delta", "dew",
+  "dolphin", "dove", "drake", "dusk", "dust", "eagle", "echo", "eel",
+  "elder", "elk", "elm", "ember", "epoch", "fable", "falcon", "fern",
+  "field", "finch", "fire", "fjord", "flame", "flint", "flood", "flux",
+  "fog", "forest", "forge", "fort", "fossil", "fox", "frost", "gale",
+  "gate", "gem", "geyser", "ghost", "glacier", "glade", "glen", "glyph",
+  "grain", "granite", "grove", "gull", "harbor", "hawk", "hazel", "heath",
+  "hedge", "heron", "hill", "hollow", "horizon", "horn", "hound", "hull",
+  "hummingbird", "ice", "inlet", "iris", "isle", "ivy", "jaguar", "jay",
+  "kelp", "kite", "knoll", "lake", "lantern", "lark", "lava", "leaf",
+  "ledge", "legend", "lens", "leopard", "lichen", "light", "lily", "lion",
+  "log", "loon", "lotus", "lynx", "mantle", "maple", "marsh", "mast",
+  "meadow", "mesa", "meteor", "mist", "moon", "moss", "moth", "mountain",
+  "murex", "myrtle", "nebula", "nest", "nettle", "node", "north", "oak",
+  "ocean", "orbit", "osprey", "otter", "owl", "ozone", "path", "pebble",
+  "peak", "petal", "pine", "plain", "planet", "plover", "pool", "prism",
+  "pulse", "quartz", "raven", "reed", "reef", "ridge", "rift", "ripple",
+  "river", "robin", "rock", "root", "rune", "rush", "sage", "salmon",
+  "sand", "sap", "seal", "seed", "shard", "shell", "shore", "shrike",
+  "sierra", "signal", "slate", "slope", "smoke", "snow", "soil", "solstice",
+  "sparrow", "spire", "spring", "spruce", "star", "steed", "stem", "stone",
+  "storm", "stream", "summit", "sun", "surge", "swan", "swift", "thorn",
+  "tide", "timber", "torch", "torrent", "trace", "trail", "tree", "trout",
+  "tundra", "vale", "valley", "vapor", "vault", "veil", "vine", "violet",
+  "viper", "vole", "vulture", "wave", "whale", "willow", "wind", "wolf",
+  "wren", "yew", "zenith",
+  // additional to ensure ≥200
+  "abyss", "acorn", "aerie", "agar", "agate", "alcove", "alder", "algae",
+  "aloe", "alpine", "altar", "amber", "amethyst", "amphora", "antler",
+  "apex", "aquifer", "arbor", "arch", "arden", "armour", "arroyo",
+  "aspen", "atoll", "avocet", "azalea", "balsam", "basin", "basalt",
+  "bat", "bay", "bell", "berg", "bison", "blackbird", "blaze", "bluebell",
+];
+
+export function deriveCandidate(address: string, attempt: number): string {
+  const lower = address.toLowerCase();
+  const seed = keccak256(toUtf8Bytes(`${lower}:${attempt}`));
+  const adjIdx = Number(BigInt("0x" + seed.slice(2, 10)) % BigInt(ADJECTIVES.length));
+  const nounIdx = Number(BigInt("0x" + seed.slice(10, 18)) % BigInt(NOUNS.length));
+  return `${ADJECTIVES[adjIdx]}-${NOUNS[nounIdx]}`;
+}
