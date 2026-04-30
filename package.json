@@ -4,7 +4,8 @@
   "workspaces": [
     "contracts",
     "agents",
-    "web"
+    "web",
+    "mcp"
   ],
   "scripts": {
     "build": "npm run build -ws --if-present",
