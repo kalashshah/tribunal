@@ -1,13 +1,9 @@
 {
   "network": "16602",
   "deployer": "0x369db11Fbdfe58e307B35776c4b7Fca4AE7eA0C4",
-  "AgentRegistry": "0x1B32D545e91a1dD11efb5B8e8336369103C4Cc4C",
-  "TribunalCore": "0xC434C901a184c06Bb8911708B65267bD4e6A68a7",
-  "EscrowAdapter": "0xE673BAF7C25A7B42e62C668B1562aDA81311F93d",
-  "VerdictLog": "0xDBffDCc253Da588549C4d82167d1d5100D9a050a",
-  "JudgeINFT": "0x1Bb3C9f7315A3E7787174f9Ddd516cF45DdF08d4",
-  "keeperhub": {
-    "rulingWatchWorkflowId": "rxql03zl4l7ykraznls93",
-    "deadlineScanWorkflowId": "s7y1f8xmz3g9yfbelbikk"
-  }
+  "AgentRegistry": "0x700C9D9d805856002CDEEA6308B60a498B70f062",
+  "TribunalCore": "0x66d458b8fA1536ACA66ACC7EE7F685375c754F6a",
+  "EscrowAdapter": "0x9DAE393237630bB8EeE7e8C4060bf644Ca1b3d5A",
+  "VerdictLog": "0xcb32b9954FCfee170A32e85280F867BbF847E441",
+  "JudgeINFT": "0xa0e4229F6175716916D84922E2ccDB8A6495C07b"
 }
