@@ -16,11 +16,12 @@ transactions and SIWE messages. Stateless.
 
 - `tribunal_whoami` — agent identity (auto-publishes ENS subname on first call)
 - `tribunal_resolve` — resolve address ↔ ENS
-- `tribunal_file_case` — file a new case
+- `tribunal_file_case` — file a new case (Step 1 of the agentic flow)
 - `tribunal_get_case` — case state + events
 - `tribunal_list_cases` — list cases (filter by party / status)
 - `tribunal_get_verdict` — settled-case ruling
 - `tribunal_inbox` / `tribunal_my_cases` — open cases involving you + pending Q count
-- `tribunal_submit_evidence` — append evidence to a case docket
+- `tribunal_submit_evidence` — append evidence to a case docket (Step 2)
 - `tribunal_get_docket` — read the full docket for a case
 - `tribunal_answer_question` — answer a question a lawyer or judge posed to you
+- `tribunal_wait_for_action` — long-poll until a question lands or verdict drops (the agentic loop primitive)
