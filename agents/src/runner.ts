@@ -58,6 +58,7 @@ interface ContractAddresses {
   VerdictLog: string;
   JudgeINFT: string;
   TribunalEscrow?: string;
+  RuleBookGovernor: string;
 }
 
 function envOrThrow(key: string): string {
@@ -71,11 +72,12 @@ function loadAddresses(): ContractAddresses {
   const j = JSON.parse(fs.readFileSync(p, "utf8")) as DeploymentJson;
   const c = j?.chains?.ogGalileo?.contracts ?? j?.legacy ?? j;
   return {
-    AgentRegistry: c.AgentRegistry,
-    TribunalCore:  c.TribunalCore,
-    EscrowAdapter: c.EscrowAdapter,
-    VerdictLog:    c.VerdictLog,
-    JudgeINFT:     c.JudgeINFT,
+    AgentRegistry:    c.AgentRegistry,
+    TribunalCore:     c.TribunalCore,
+    EscrowAdapter:    c.EscrowAdapter,
+    VerdictLog:       c.VerdictLog,
+    JudgeINFT:        c.JudgeINFT,
+    RuleBookGovernor: c.RuleBookGovernor,
     ...(c.TribunalEscrow ? { TribunalEscrow: c.TribunalEscrow } as { TribunalEscrow: string } : {}),
   };
 }
@@ -290,6 +292,26 @@ async function main() {
   const { storage, kind: storageKind } = await buildStorage(rpcUrl, operator);
   console.log(`Storage backend: ${storageKind}`);
 
+  // ---- Rulebook (governor + 0G) ------------------------------------------
+  const { loadRulebook } = await import("./judge/rulebook.js");
+  const governorAddr = (addr as any).RuleBookGovernor;
+  if (!governorAddr) throw new Error("RuleBookGovernor not in deployment.json — re-run deploy");
+  const governorAbi = [
+    "function baseRoot() view returns (bytes32)",
+    "function amendmentCount() view returns (uint256)",
+    "function amendmentAt(uint256) view returns (tuple(bytes32 cidRoot,string cidUrl,string title,uint64 appliedAt))",
+  ];
+  const governor = new ethers.Contract(governorAddr, governorAbi, operator);
+  const rulebook = await loadRulebook({
+    governor: {
+      baseRoot:       async () => await governor.baseRoot(),
+      amendmentCount: async () => await governor.amendmentCount(),
+      amendmentAt:    async (i: number | bigint) => await governor.amendmentAt(i),
+    },
+    storage,
+  });
+  console.log(`[runner] rulebook loaded: ${rulebook.toc.length} articles`);
+
   const judgeAddress = baseJudge.address;
   console.log("Judge address:", judgeAddress);
 
@@ -470,10 +492,11 @@ async function main() {
         mode: partyMode,
         qaTimeoutMs,
         docketText,
-        // TODO(T16): replace with real rulebook loaded from RuleBookGovernor
-        rulebook: { toc: [], byId: new Map() },
+        rulebook,
         storage,
-        chainUrl: (h) => `0g://${h}`,
+        chainUrl: (h: string) => storageKind === "0g"
+          ? `https://storagescan-galileo.0g.ai/file/${h}`
+          : `memory:${h}`,
       });
 
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
