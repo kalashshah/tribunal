@@ -1,68 +1,72 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-/// @title RuleBookGovernor
-/// @notice Open-address governance for the Tribunal rulebook. Stores the
-///         0G Storage rootHash of the base rulebook plus an append-only
-///         list of amendment rootHashes. Anyone can propose; one address
-///         = one vote. Quorum is fixed at construction (2 in tests).
-///
-///         The `humanityOracle` slot is reserved: when set, votes will be
-///         gated through the oracle (World ID / Proof of Humanity). Today
-///         it is unset (address(0) = open).
-contract RuleBookGovernor {
-    struct Amendment {
-        bytes32 cidRoot;     // 0G Storage rootHash of the amendment text
-        string  cidUrl;      // human-readable pointer (storagescan link)
-        string  title;
-        uint64  appliedAt;
-    }
+interface IRuleBook {
+    function addArticle(string calldata articleId, bytes32 ensNode, string calldata chapter)
+        external returns (uint256 idx);
+    function exists(string calldata articleId) external view returns (bool);
+}
 
+/// @title RuleBookGovernor
+/// @notice Open-address governance over the Tribunal rulebook. Each
+///         proposal nominates a new article (articleId + ENS namehash +
+///         chapter). One address = one vote. Once `quorum` yes-votes are
+///         recorded, anyone can execute the proposal, which calls
+///         `RuleBook.addArticle(...)` on the registry.
+///
+///         The `humanityOracle` slot is reserved for World ID / Proof of
+///         Humanity gating (unset today = open voting).
+contract RuleBookGovernor {
     struct Proposal {
         address proposer;
         string  title;
-        bytes32 cidRoot;
-        string  cidUrl;
+        string  articleId;
+        bytes32 ensNode;
+        string  chapter;
         uint32  yes;
         uint32  no;
         bool    executed;
     }
 
-    bytes32 public immutable baseRoot;
-    string  public           baseUrl;
-    Amendment[] private _amendments;
-    Proposal[]  private _proposals;
+    IRuleBook public immutable ruleBook;
+    Proposal[] private _proposals;
     mapping(uint256 => mapping(address => bool)) private _voted;
 
-    address public humanityOracle;     // address(0) = open voting
-    uint32  public immutable quorum;             // simple yes-vote threshold (set at construction)
+    address public humanityOracle;       // address(0) = open voting
+    uint32  public immutable quorum;     // simple yes-vote threshold
 
-    event Proposed(uint256 indexed id, address indexed proposer, string title, bytes32 cidRoot);
+    event Proposed(uint256 indexed id, address indexed proposer, string title, string articleId, bytes32 ensNode);
     event Voted(uint256 indexed id, address indexed voter, bool support);
-    event Executed(uint256 indexed id, bytes32 cidRoot);
+    event Executed(uint256 indexed id, string articleId, bytes32 ensNode);
 
-    constructor(bytes32 baseRoot_, string memory baseUrl_) {
-        require(baseRoot_ != bytes32(0), "zero base root");
-        baseRoot = baseRoot_;
-        baseUrl = baseUrl_;
+    constructor(address ruleBook_) {
+        require(ruleBook_ != address(0), "zero ruleBook");
+        ruleBook = IRuleBook(ruleBook_);
         quorum = 2; // demo default; bump via redeploy when panel grows
     }
 
-    function amendmentCount() external view returns (uint256) { return _amendments.length; }
-    function amendmentAt(uint256 i) external view returns (Amendment memory) { return _amendments[i]; }
     function proposalCount() external view returns (uint256) { return _proposals.length; }
     function proposalAt(uint256 i) external view returns (Proposal memory) { return _proposals[i]; }
 
-    function propose(string calldata title, bytes32 cidRoot, string calldata cidUrl)
-        external returns (uint256 id)
-    {
-        require(cidRoot != bytes32(0), "zero cid root");
+    function propose(
+        string calldata title,
+        string calldata articleId,
+        bytes32 ensNode,
+        string calldata chapter
+    ) external returns (uint256 id) {
+        require(bytes(articleId).length > 0, "empty articleId");
+        require(ensNode != bytes32(0), "zero ensNode");
+        require(!ruleBook.exists(articleId), "article already in rulebook");
         id = _proposals.length;
         _proposals.push(Proposal({
-            proposer: msg.sender, title: title, cidRoot: cidRoot, cidUrl: cidUrl,
+            proposer: msg.sender,
+            title: title,
+            articleId: articleId,
+            ensNode: ensNode,
+            chapter: chapter,
             yes: 0, no: 0, executed: false
         }));
-        emit Proposed(id, msg.sender, title, cidRoot);
+        emit Proposed(id, msg.sender, title, articleId, ensNode);
     }
 
     function vote(uint256 id, bool support) external {
@@ -79,18 +83,7 @@ contract RuleBookGovernor {
         require(!p.executed, "already executed");
         require(p.yes >= quorum, "quorum not met");
         p.executed = true;
-        _amendments.push(Amendment({
-            cidRoot: p.cidRoot, cidUrl: p.cidUrl, title: p.title, appliedAt: uint64(block.timestamp)
-        }));
-        emit Executed(id, p.cidRoot);
-    }
-
-    /// keccak256(base || amend_0_root || amend_1_root || ...). Anyone can
-    /// recompute this off-chain from baseRoot + amendmentAt(i).cidRoot.
-    function currentManifestHash() external view returns (bytes32 h) {
-        h = baseRoot;
-        for (uint256 i = 0; i < _amendments.length; i++) {
-            h = keccak256(abi.encodePacked(h, _amendments[i].cidRoot));
-        }
+        ruleBook.addArticle(p.articleId, p.ensNode, p.chapter);
+        emit Executed(id, p.articleId, p.ensNode);
     }
 }
