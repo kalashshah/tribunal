@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { ProposeForm } from "./ProposeForm";
 import { ProposalRow } from "./ProposalRow";
+import { ArticleList } from "./ArticleList";
 
 interface Amendment { cidRoot: string; cidUrl: string; title: string; appliedAt: bigint }
 interface Proposal  { id: number; proposer: string; title: string; cidRoot: string; cidUrl: string; yes: number; no: number; executed: boolean }
@@ -17,17 +18,25 @@ export default function RulebookPage() {
   if (!s) return <main className="p-8">Loading…</main>;
 
   return (
-    <main className="max-w-3xl mx-auto p-8 space-y-6">
+    <main className="max-w-4xl mx-auto p-8 space-y-8">
       <header>
         <h1 className="text-2xl font-bold">Tribunal Rulebook</h1>
         <p className="text-sm opacity-70">
-          Demo governance — open voting, one address one vote. Future: gated via World ID / Proof of Humanity.
+          A curated UNIDROIT subset anchored on 0G Storage. Each rule is
+          addressable by an ENS subname; the judge's deliberation loop cites
+          rules by either article id or ENS name. Governance is open
+          one-address-one-vote (humanity-oracle slot reserved).
         </p>
       </header>
 
       <section>
         <h2 className="font-semibold">Current rulebook</h2>
-        <p className="text-sm">Base: <code>{s.baseRoot.slice(0, 14)}…</code> ({s.baseUrl})</p>
+        <p className="text-sm">
+          Governor: <code>{s.address}</code>
+        </p>
+        <p className="text-sm">
+          Base root: <code>{s.baseRoot.slice(0, 14)}…</code> ({s.baseUrl})
+        </p>
         <p className="text-sm">{s.amendments.length} amendment(s) applied</p>
         <ul className="mt-2 list-disc ml-6">
           {s.amendments.map((a, i) => (
@@ -36,6 +45,11 @@ export default function RulebookPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section>
+        <h2 className="font-semibold">Articles</h2>
+        <ArticleList />
       </section>
 
       <section>
