@@ -470,6 +470,10 @@ async function main() {
         mode: partyMode,
         qaTimeoutMs,
         docketText,
+        // TODO(T16): replace with real rulebook loaded from RuleBookGovernor
+        rulebook: { toc: [], byId: new Map() },
+        storage,
+        chainUrl: (h) => `0g://${h}`,
       });
 
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

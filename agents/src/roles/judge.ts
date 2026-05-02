@@ -29,6 +29,12 @@ export interface JudgeArgs {
   backendUrl: string;
   mode: "human" | "auto";
   qaTimeoutMs?: number;
+  /// Loaded rulebook (TOC + body lookup map). Required.
+  rulebook: { toc: import("../judge/deliberate-loop.js").TocEntry[]; byId: Map<string, import("../judge/deliberate-loop.js").Article> };
+  /// 0G storage for chain manifest upload. Required.
+  storage: import("../storage/og-storage.js").ZgStorage;
+  /// Renders a chain manifest viewer URL from its rootHash.
+  chainUrl: (rootHash: string) => string;
   /// Optional pre-rendered case docket text. The judge captures it by closure
   /// at construction time; re-create the judge between phases for fresh text.
   docketText?: string;
@@ -62,48 +68,6 @@ Given the trial transcript, return JSON of the form:
   {"prevailingIsAccuser": boolean, "opinion": string}
 The opinion is your reasoning, max 300 words. Return JSON ONLY, no preamble.`;
 
-/// Extract the first balanced {...} object from arbitrary LLM output.
-/// Handles markdown fences, leading commentary, and trailing prose.
-function extractFirstJsonObject(text: string): string {
-  const stripped = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-  const start = stripped.indexOf("{");
-  if (start === -1) return stripped;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < stripped.length; i++) {
-    const c = stripped[i];
-    if (escape) { escape = false; continue; }
-    if (c === "\\") { escape = true; continue; }
-    if (c === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (c === "{") depth += 1;
-    else if (c === "}") {
-      depth -= 1;
-      if (depth === 0) return stripped.slice(start, i + 1);
-    }
-  }
-  return stripped.slice(start);
-}
-
-function parseRuling(text: string): Ruling {
-  const candidate = extractFirstJsonObject(text);
-  let parsed: any;
-  try {
-    parsed = JSON.parse(candidate);
-  } catch (e) {
-    // Best-effort repair: replace bare newlines inside strings with \n.
-    const repaired = candidate.replace(
-      /"((?:\\.|[^"\\])*)"/gs,
-      (_m, body) => `"${body.replace(/\r?\n/g, "\\n")}"`,
-    );
-    parsed = JSON.parse(repaired);
-  }
-  if (typeof parsed.prevailingIsAccuser !== "boolean" || typeof parsed.opinion !== "string") {
-    throw new Error("ruling JSON missing required fields");
-  }
-  return parsed as Ruling;
-}
 
 export interface Judge {
   /// Optional pre-deliberation step: judge may pose ONE clarifying question
@@ -164,44 +128,38 @@ export function createJudge(a: JudgeArgs): Judge {
     },
 
     async deliberateAndRule(transcriptText) {
-      // Up to 3 attempts: free models occasionally return malformed JSON.
-      let ruling: Ruling | undefined;
-      let receipt: { hash: `0x${string}`; url: string } | undefined;
-      let lastError: unknown;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        const out = await a.llm.complete({
-          system: SYSTEM(a.personaPrompt, a.priorRulings, a.docketText ?? "Case docket: (not loaded)"),
-          messages: [
-            { role: "user", content: `Trial transcript:\n${transcriptText}\n\nReturn the JSON now.` },
-          ],
-          responseFormat: "json",
-        });
-        try {
-          ruling = parseRuling(out.text);
-          // Only attach the receipt from the *successful* attempt — earlier
-          // tries that produced malformed JSON aren't the verdict the panel
-          // anchors.
-          if (out.receipt) receipt = out.receipt;
-          break;
-        } catch (e) {
-          lastError = e;
-          if (attempt === 3) {
-            console.error(`[judge] parse failed (attempt ${attempt}). Raw output:\n${out.text}`);
-          }
-        }
-      }
-      if (!ruling) throw lastError ?? new Error("ruling could not be parsed");
-      if (receipt) ruling.receipt = receipt;
-      const opinionHash = keccak256(toUtf8Bytes(ruling.opinion)) as `0x${string}`;
+      const { runDeliberateLoop } = await import("../judge/deliberate-loop.js");
+      const { buildChainManifest, uploadChainManifest } = await import("../judge/chain.js");
+
+      const out = await runDeliberateLoop({
+        llm: a.llm,
+        systemBase: SYSTEM(a.personaPrompt, a.priorRulings, a.docketText ?? "Case docket: (not loaded)"),
+        transcript: transcriptText,
+        toc: a.rulebook.toc,
+        lookupArticle: (id) => a.rulebook.byId.get(id) ?? null,
+        maxLookups: 3,
+        maxArticles: 6,
+      });
+
+      const opinionHash = keccak256(toUtf8Bytes(out.ruling.opinion)) as `0x${string}`;
+
+      const manifest = buildChainManifest({
+        caseId: a.caseId.toString(), model: a.model,
+        ruling: out.ruling, chain: out.chain,
+      });
+      const up = await uploadChainManifest({ storage: a.storage, manifest, url: a.chainUrl });
+      const ruling: Ruling = {
+        prevailingIsAccuser: out.ruling.prevailingIsAccuser,
+        opinion: out.ruling.opinion,
+        receipt: { hash: up.rootHash, url: up.url },
+      };
 
       await a.axl.send(a.clerkPeerId, {
-        kind: "ruling",
-        from: a.ensName,
-        body: ruling.opinion,
+        kind: "ruling", from: a.ensName, body: ruling.opinion,
         meta: {
           prevailingIsAccuser: ruling.prevailingIsAccuser,
           caseId: a.caseId.toString(),
-          ...(receipt ? { receiptHash: receipt.hash, receiptUrl: receipt.url } : {}),
+          chainHash: up.rootHash, chainUrl: up.url,
         },
       });
       await a.tribunal.submitRuling(a.caseId, ruling.prevailingIsAccuser, opinionHash);

@@ -1,61 +1,47 @@
-import { describe, expect, it, vi } from "vitest";
-import { createJudge } from "../../src/roles/judge";
+import { describe, it, expect, vi } from "vitest";
+import { createJudge } from "../../src/roles/judge.js";
 
-function deps(text: string) {
-  const llm = { complete: vi.fn(async () => ({ text, inputTokens: 1, outputTokens: 1 })) };
-  const axl = { send: vi.fn(async () => {}), peerId: vi.fn(async () => "PEER_J"), recv: vi.fn() };
-  const tribunal = {
-    anchorEvent: vi.fn(),
-    acceptCase: vi.fn(),
-    submitRuling: vi.fn(async () => {}),
-    appendJudgeMemory: vi.fn(async () => {}),
-    markSettled: vi.fn(),
-  };
-  return { llm, axl, tribunal };
-}
+describe("judge.deliberateAndRule (rulebook loop)", () => {
+  it("runs LOOKUP→RULE, anchors chain root, appends iNFT memory", async () => {
+    const responses = [
+      { text: "LOOKUP: 7.4.2",                                              receipt: { hash: "0xaa", url: "u1" } },
+      { text: 'RULE: {"prevailingIsAccuser":true,"opinion":"per Art. 7.4.2"}', receipt: { hash: "0xbb", url: "u2" } },
+    ];
+    let i = 0;
+    const llm = { complete: vi.fn(async () => responses[i++] as any) };
+    const axl = { send: vi.fn(async () => {}), peerId: vi.fn(async () => "p") };
+    const tribunal = {
+      anchorEvent: vi.fn(), acceptCase: vi.fn(),
+      submitRuling: vi.fn(),
+      appendJudgeMemory: vi.fn(),
+      markSettled: vi.fn(),
+      finalizeVerdict: vi.fn(async () => ({ txHash: "0xtx" })),
+      finalizeVerdictWithReceipt: vi.fn(async () => ({ txHash: "0xtx" })),
+    };
+    const storage = { upload: vi.fn(async () => ({ rootHash: "0xchain", txHash: "0xtx", txSeq: 1 })), download: vi.fn() };
+    const rulebook = {
+      toc:  [{ id: "7.4.2", title: "Full compensation" }, { id: "1.7", title: "Good faith" }],
+      byId: new Map([
+        ["7.4.2", { id: "7.4.2", title: "Full compensation", body: "compensate" }],
+        ["1.7",   { id: "1.7",   title: "Good faith",        body: "good faith" }],
+      ]),
+    };
 
-function judge(d: ReturnType<typeof deps>) {
-  return createJudge({
-    ensName: "judge-athena.tribunal.eth",
-    caseId: 1n,
-    tokenId: 7n,
-    personaPrompt: "You are a careful textualist.",
-    priorRulings: [],
-    llm: d.llm as any,
-    axl: d.axl as any,
-    tribunal: d.tribunal as any,
-    clerkPeerId: "PEER_CLERK",
-    model: "claude-sonnet-4-6",
-  });
-}
+    const judge = createJudge({
+      ensName: "judge.eth", caseId: 7n, tokenId: 1n, personaPrompt: "p", priorRulings: [],
+      llm: llm as any, axl: axl as any, tribunal: tribunal as any, clerkPeerId: "c", model: "m",
+      partyEns: { accuser: "a", defendant: "b" }, partyAddress: { accuser: "0x1", defendant: "0x2" },
+      backendUrl: "http://x", mode: "auto",
+      rulebook, storage: storage as any,
+      chainUrl: (h) => `0g://${h}`,
+    });
 
-describe("Judge.deliberateAndRule", () => {
-  it("parses JSON ruling, emits over AXL, submits on-chain, and appends iNFT memory", async () => {
-    const d = deps('{"prevailingIsAccuser": true, "opinion": "Alice delivered."}');
-    const ruling = await judge(d).deliberateAndRule("transcript text");
-    expect(ruling).toEqual({ prevailingIsAccuser: true, opinion: "Alice delivered." });
-    expect(d.tribunal.submitRuling).toHaveBeenCalledOnce();
-    expect(d.tribunal.appendJudgeMemory).toHaveBeenCalledOnce();
-    expect(d.axl.send).toHaveBeenCalledWith(
-      "PEER_CLERK",
-      expect.objectContaining({ kind: "ruling", from: "judge-athena.tribunal.eth" }),
-    );
-  });
-
-  it("strips ```json fencing if the LLM wraps the JSON", async () => {
-    const d = deps('```json\n{"prevailingIsAccuser": false, "opinion": "Bob wins."}\n```');
-    const ruling = await judge(d).deliberateAndRule("t");
-    expect(ruling.prevailingIsAccuser).toBe(false);
-  });
-
-  it("throws when ruling JSON is malformed", async () => {
-    const d = deps('not json');
-    await expect(judge(d).deliberateAndRule("t")).rejects.toThrow();
-    expect(d.tribunal.submitRuling).not.toHaveBeenCalled();
-  });
-
-  it("throws when required fields are missing", async () => {
-    const d = deps('{"opinion": "no verdict"}');
-    await expect(judge(d).deliberateAndRule("t")).rejects.toThrow(/missing required fields/);
+    const ruling = await judge.deliberateAndRule("alice vs bob");
+    expect(ruling.prevailingIsAccuser).toBe(true);
+    expect(tribunal.submitRuling).toHaveBeenCalled();
+    expect(tribunal.appendJudgeMemory).toHaveBeenCalled();
+    expect(storage.upload).toHaveBeenCalledOnce();
+    expect(ruling.receipt?.hash).toBe("0xchain");
+    expect(ruling.receipt?.url).toBe("0g://0xchain");
   });
 });

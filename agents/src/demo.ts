@@ -126,19 +126,14 @@ async function main() {
   const judgeINFTAsJudge = new ethers.Contract(dep.JudgeINFT, loadAbi("JudgeINFT"), judgeOwner);
   const tribunalAsAccuser = new ethers.Contract(dep.TribunalCore, loadAbi("TribunalCore"), accuser);
 
-  // Register agents (idempotent).
-  async function registerOrLookup(signer: Wallet, ens: string, role: string): Promise<bigint> {
-    const r = registry.connect(signer) as any;
-    try {
-      const tx = await r.register(ens, role);
-      await tx.wait();
-    } catch { /* already registered */ }
-    return (await registry.idByEns(ens)) as bigint;
+  // AgentRegistry is address-keyed and only tracks Lawyer/Judge — litigants
+  // file as their own wallet. Admit the judge so submitRuling's role check
+  // passes; admitJudge is idempotent (writes the same Role.Judge slot).
+  const Role = { None: 0, Lawyer: 1, Judge: 2 } as const;
+  if (Number(await registry.roleOf(judgeOwner.address)) !== Role.Judge) {
+    await (await registry.admitJudge(judgeOwner.address)).wait();
   }
-  const accuserId  = await registerOrLookup(accuser,    "alice.tribunal.eth",       "litigant");
-  const defendantId= await registerOrLookup(defendant,  "bob.tribunal.eth",         "litigant");
-  const judgeAgentId = await registerOrLookup(judgeOwner, "judge-athena.tribunal.eth", "judge");
-  log("registry", `accuser=${accuserId} defendant=${defendantId} judge=${judgeAgentId}`);
+  log("registry", `judge admitted: ${judgeOwner.address}`);
 
   // Mint judge iNFT (skip silently if any token already exists for this owner).
   let judgeTokenId = 1n;
@@ -157,20 +152,23 @@ async function main() {
   } catch (e: any) {
     log("judges", `skipped mint (${e.message?.slice(0, 60)}); using token #1`);
   }
-  const initialHistoryLen = ((await judgeINFT.rulingHistory(judgeTokenId)) as string[]).length;
+  const initialHistoryLen = ((await judgeINFT.rulingHistory(judgeTokenId)) as `0x${string}`[]).length;
 
-  // File the case from the accuser, no escrow for simplicity.
+  // File the case from the accuser, no escrow for simplicity. fileCase is
+  // payable (BASE_FEE = 0.01 ETH) and takes the defendant address directly.
+  const baseFee = (await tribunalCore.BASE_FEE()) as bigint;
   const filedTx = await tribunalAsAccuser.fileCase(
-    accuserId, defendantId, ethers.ZeroAddress, 0, "ipfs://accusation-mock",
+    defendant.address, ethers.ZeroAddress, 0, "ipfs://accusation-mock",
+    { value: baseFee },
   );
   const filedRc = await filedTx.wait();
   const filedEv = filedRc!.logs
     .map((l: any) => { try { return tribunalCore.interface.parseLog(l); } catch { return null; } })
     .find((e: any) => e?.name === "CaseFiled");
   const caseId: bigint = filedEv!.args.caseId;
-  log("file", `case #${caseId} filed by accuser`);
+  log("file", `case #${caseId} filed by accuser (fee ${ethers.formatEther(baseFee)} ETH)`);
 
-  await (await tribunalCore.acceptCase(caseId, [judgeAgentId], 1n)).wait();
+  await (await tribunalCore.acceptCase(caseId, [judgeOwner.address], 1n)).wait();
   log("accept", `case #${caseId} accepted, single-judge panel`);
 
   // Wire the agent runtime. Default uses an in-memory bus; set
@@ -295,6 +293,10 @@ async function main() {
     partyAddress: demoPartyAddress,
     backendUrl: demoBackendUrl,
     mode: demoPartyMode,
+    // TODO(T16): replace with real rulebook loaded from RuleBookGovernor
+    rulebook: { toc: [], byId: new Map() },
+    storage,
+    chainUrl: (h) => `0g://${h}`,
   });
 
   const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -324,6 +326,11 @@ async function main() {
   log("trial", "--- judge deliberation ---");
   const ruling = await judge.deliberateAndRule(clerk.render());
   log("verdict", `prevailingIsAccuser=${ruling.prevailingIsAccuser}`);
+
+  // Drain any in-flight clerk anchor txs before settling the case.
+  // `recordEvent` reverts with "bad state" once status flips to Settled,
+  // and the operator wallet's nonce would race finalizeVerdict otherwise.
+  await clerk.flush();
 
   // Post verdict + mark settled in a single tx via TribunalCore (would
   // normally be triggered by KeeperHub on the production deployment).
