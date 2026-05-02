@@ -37,6 +37,8 @@ export async function loadRulebook({ governor, storage }: LoadOpts): Promise<Rul
 
   const byId = new Map<string, Article>();
   for (const a of articles) byId.set(a.id, a);
-  const toc: TocEntry[] = articles.map((a) => ({ id: a.id, title: a.title }));
+  // Build TOC from the deduped map (preserves insertion order; later
+  // amendments override earlier titles for the same id, no duplicates).
+  const toc: TocEntry[] = [...byId.values()].map((a) => ({ id: a.id, title: a.title }));
   return { toc, byId };
 }
