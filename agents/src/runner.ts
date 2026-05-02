@@ -58,6 +58,7 @@ interface ContractAddresses {
   VerdictLog: string;
   JudgeINFT: string;
   TribunalEscrow?: string;
+  RuleBook: string;
   RuleBookGovernor: string;
 }
 
@@ -77,6 +78,7 @@ function loadAddresses(): ContractAddresses {
     EscrowAdapter:    c.EscrowAdapter,
     VerdictLog:       c.VerdictLog,
     JudgeINFT:        c.JudgeINFT,
+    RuleBook:         c.RuleBook,
     RuleBookGovernor: c.RuleBookGovernor,
     ...(c.TribunalEscrow ? { TribunalEscrow: c.TribunalEscrow } as { TribunalEscrow: string } : {}),
   };
@@ -292,36 +294,27 @@ async function main() {
   const { storage, kind: storageKind } = await buildStorage(rpcUrl, operator);
   console.log(`Storage backend: ${storageKind}`);
 
-  // For the in-memory storage backend, deploy.ts only stores the rulebook's
-  // keccak hash in the contract — the bytes themselves are never uploaded.
-  // Hydrate them here so loadRulebook's storage.download(baseRoot) hits.
-  // In 0G mode the bytes live on the indexer (uploaded by seed-rulebook.ts).
-  if (storageKind === "memory") {
-    const seedFile = path.resolve(__dirname, "../../agents/enclave/rulebook/unidroit-v1.json");
-    if (fs.existsSync(seedFile)) {
-      await storage.upload(fs.readFileSync(seedFile));
-    }
-  }
-
-  // ---- Rulebook (governor + 0G) ------------------------------------------
+  // ---- Rulebook (RuleBook registry on 0G + ENS resolution on Sepolia) ----
   const { loadRulebook } = await import("./judge/rulebook.js");
-  const governorAddr = (addr as any).RuleBookGovernor;
-  if (!governorAddr) throw new Error("RuleBookGovernor not in deployment.json — re-run deploy");
-  const governorAbi = [
-    "function baseRoot() view returns (bytes32)",
-    "function amendmentCount() view returns (uint256)",
-    "function amendmentAt(uint256) view returns (tuple(bytes32 cidRoot,string cidUrl,string title,uint64 appliedAt))",
+  const { createEnsResolver } = await import("./judge/ens-resolver.js");
+  const ruleBookAddr = (addr as any).RuleBook;
+  if (!ruleBookAddr) throw new Error("RuleBook not in deployment.json — re-run deploy");
+  const ruleBookAbi = [
+    "function articleCount() view returns (uint256)",
+    "function articleAt(uint256) view returns (tuple(string articleId,bytes32 ensNode,string chapter,uint64 addedAt))",
   ];
-  const governor = new ethers.Contract(governorAddr, governorAbi, operator);
+  const ruleBookContract = new ethers.Contract(ruleBookAddr, ruleBookAbi, operator);
+  const ensRpc = process.env.ENS_RPC_URL;
+  if (!ensRpc) throw new Error("ENS_RPC_URL not set — required to resolve rulebook articles on Sepolia");
+  const ens = await createEnsResolver({ rpcUrl: ensRpc });
   const rulebook = await loadRulebook({
-    governor: {
-      baseRoot:       async () => await governor.baseRoot(),
-      amendmentCount: async () => await governor.amendmentCount(),
-      amendmentAt:    async (i: number | bigint) => await governor.amendmentAt(i),
+    ruleBook: {
+      articleCount: async () => await ruleBookContract.articleCount(),
+      articleAt:    async (i: number | bigint) => await ruleBookContract.articleAt(i),
     },
-    storage,
+    ens,
   });
-  console.log(`[runner] rulebook loaded: ${rulebook.toc.length} articles`);
+  console.log(`[runner] rulebook loaded: ${rulebook.toc.length} articles (resolved from ENS on Sepolia)`);
 
   const judgeAddress = baseJudge.address;
   console.log("Judge address:", judgeAddress);

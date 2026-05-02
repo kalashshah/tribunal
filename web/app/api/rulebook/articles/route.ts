@@ -3,92 +3,119 @@ import { ethers } from "ethers";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const ABI = [
-  "function baseRoot() view returns (bytes32)",
-  "function baseUrl() view returns (string)",
-  "function amendmentCount() view returns (uint256)",
-  "function amendmentAt(uint256) view returns (tuple(bytes32 cidRoot,string cidUrl,string title,uint64 appliedAt))",
+// Reads the RuleBook registry on 0G + resolves each article's ENS namehash
+// on Sepolia to fetch its description (body) and tribunal.title (title)
+// text records. Articles are the source of truth: the registry says
+// which namehashes are canonical, and ENS supplies the content.
+
+const RULEBOOK_ABI = [
+  "function articleCount() view returns (uint256)",
+  "function articleAt(uint256) view returns (tuple(string articleId,bytes32 ensNode,string chapter,uint64 addedAt))",
 ];
 
-interface Article { id: string; title: string; body: string }
+const ENS_REGISTRY = "0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e";
+const ENS_REGISTRY_ABI = [
+  "function resolver(bytes32 node) view returns (address)",
+];
+const RESOLVER_ABI = [
+  "function text(bytes32 node, string key) view returns (string)",
+];
 
-function loadGovernor(): string | null {
+interface Deployment { RuleBook?: string }
+
+function loadDeployment(): Deployment {
   const p = path.resolve(process.cwd(), "../docs/deployment.json");
-  try {
-    return JSON.parse(fs.readFileSync(p, "utf8")).RuleBookGovernor ?? null;
-  } catch { return null; }
+  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return {}; }
 }
 
-function loadSeedFile(): { bytes: Uint8Array; articles: Article[] } | null {
-  const p = path.resolve(process.cwd(), "../agents/enclave/rulebook/unidroit-v1.json");
-  try {
-    const raw = fs.readFileSync(p);
-    const parsed = JSON.parse(raw.toString("utf8")) as { articles: Article[] };
-    return { bytes: new Uint8Array(raw), articles: parsed.articles };
-  } catch { return null; }
-}
-
-/// chapter-1-7.rulebook.tribunal.eth — slug derived from article id.
 function ensNameFor(articleId: string): string {
-  const slug = `chapter-${articleId.replace(/\./g, "-")}`;
-  return `${slug}.rulebook.tribunal.eth`;
+  return `chapter-${articleId.replace(/\./g, "-")}.rulebook.tribunal.eth`;
 }
 
-/// Build the storagescan URL (0G) or a memory: pseudo-URL for local dev.
-function blobUrl(baseRoot: string, baseUrl: string): string {
-  if (baseUrl.startsWith("memory:")) return `memory:${baseRoot}`;
-  if (baseUrl.startsWith("0g://")) return baseUrl;
-  return baseUrl; // already a storagescan link or similar
-}
+// 5-minute server-side cache for resolved articles (and their resolvers).
+// ENS records change rarely; recomputing on every page load is wasteful.
+let cache: { at: number; data: any } | null = null;
+const CACHE_TTL = 5 * 60_000;
 
 export async function GET() {
-  const governorAddr = loadGovernor();
-  if (!governorAddr) {
-    return NextResponse.json({ error: "no governor address" }, { status: 500 });
+  if (cache && Date.now() - cache.at < CACHE_TTL) {
+    return NextResponse.json({ ...cache.data, cached: true });
+  }
+  const dep = loadDeployment();
+  if (!dep.RuleBook) {
+    return NextResponse.json({ error: "RuleBook address missing — re-run deploy" }, { status: 500 });
+  }
+  const ogRpc = process.env.WEB_RPC_URL ?? "http://127.0.0.1:8545";
+  const ensRpc = process.env.WEB_ENS_RPC_URL ?? process.env.ENS_RPC_URL;
+  if (!ensRpc) {
+    return NextResponse.json({ error: "WEB_ENS_RPC_URL (or ENS_RPC_URL) not set" }, { status: 500 });
   }
 
-  // Pull the on-chain anchor (baseRoot) so the page can claim "verified".
-  let onchain: { baseRoot: string; baseUrl: string };
-  try {
-    const provider = new ethers.JsonRpcProvider(process.env.WEB_RPC_URL ?? "http://127.0.0.1:8545");
-    const g = new ethers.Contract(governorAddr, ABI, provider);
-    onchain = { baseRoot: await g.baseRoot(), baseUrl: await g.baseUrl() };
-  } catch (e) {
-    return NextResponse.json({ error: `chain read failed: ${(e as Error).message}` }, { status: 500 });
+  const ogProvider = new ethers.JsonRpcProvider(ogRpc);
+  const ensProvider = new ethers.JsonRpcProvider(ensRpc);
+  const rb = new ethers.Contract(dep.RuleBook, RULEBOOK_ABI, ogProvider);
+
+  const n = Number(await rb.articleCount());
+  const entries: { articleId: string; ensNode: string; chapter: string }[] = [];
+  for (let i = 0; i < n; i++) {
+    const e = await rb.articleAt(i);
+    entries.push({ articleId: e.articleId, ensNode: e.ensNode, chapter: e.chapter });
   }
 
-  // Load the local seed file and verify its keccak256 matches the on-chain
-  // baseRoot. This is the verifiability story: the bytes you're reading match
-  // what governance anchored.
-  const seed = loadSeedFile();
-  if (!seed) {
-    return NextResponse.json({
-      ...onchain,
-      verified: false,
-      reason: "seed file not on disk; web cannot fetch from 0G in this build",
-      articles: [],
-    }, { status: 200 });
+  // Resolve text records on Sepolia. Cache resolver per ENS node.
+  const ensRegistry = new ethers.Contract(ENS_REGISTRY, ENS_REGISTRY_ABI, ensProvider);
+  const resolverByNode = new Map<string, string>();
+
+  async function getResolver(node: string): Promise<string | null> {
+    const cached = resolverByNode.get(node);
+    if (cached) return cached;
+    const r = (await ensRegistry.resolver(node)) as string;
+    if (r === "0x0000000000000000000000000000000000000000") return null;
+    resolverByNode.set(node, r);
+    return r;
+  }
+  async function readText(node: string, key: string): Promise<string | null> {
+    const r = await getResolver(node);
+    if (!r) return null;
+    const resolver = new ethers.Contract(r, RESOLVER_ABI, ensProvider);
+    const v = (await resolver.text(node, key)) as string;
+    return v === "" ? null : v;
   }
 
-  const localHash = ethers.keccak256(seed.bytes);
-  const verified = localHash.toLowerCase() === onchain.baseRoot.toLowerCase();
-
-  const articles = seed.articles.map((a) => ({
-    id: a.id,
-    title: a.title,
-    body: a.body,
-    ensName: ensNameFor(a.id),
-    chapter: a.id.split(".").slice(0, 2).join("."),
+  const articles = await Promise.all(entries.map(async (e) => {
+    let body: string | null = null;
+    let title: string | null = null;
+    let resolved = true;
+    let reason: string | undefined;
+    try {
+      [body, title] = await Promise.all([
+        readText(e.ensNode, "description"),
+        readText(e.ensNode, "tribunal.title"),
+      ]);
+      if (!body) { resolved = false; reason = "no description text record"; }
+    } catch (err) {
+      resolved = false;
+      reason = (err as Error).message;
+    }
+    return {
+      id: e.articleId,
+      title: title ?? e.articleId,
+      body: body ?? "",
+      ensName: ensNameFor(e.articleId),
+      ensNode: e.ensNode,
+      chapter: e.chapter,
+      resolved,
+      ...(reason ? { reason } : {}),
+    };
   }));
 
-  return NextResponse.json({
-    governor: governorAddr,
-    baseRoot: onchain.baseRoot,
-    baseUrl: onchain.baseUrl,
-    blobUrl: blobUrl(onchain.baseRoot, onchain.baseUrl),
-    verified,
-    localHash,
-    articleCount: articles.length,
+  const data = {
+    ruleBook: dep.RuleBook,
+    articleCount: n,
+    resolvedCount: articles.filter((a) => a.resolved).length,
     articles,
-  });
+    cached: false,
+  };
+  cache = { at: Date.now(), data };
+  return NextResponse.json(data);
 }

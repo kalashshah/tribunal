@@ -53,13 +53,14 @@ async function main() {
   ]);
   await Judges.waitForDeployment();
 
-  // Seed rulebook from local file. On local Hardhat, hash via keccak; in
-  // 0G mode the operator can re-run scripts/seed-rulebook.ts standalone
-  // to swap to a 0G-backed root.
-  const rulebookFile = path.resolve(__dirname, "../../agents/enclave/rulebook/unidroit-v1.json");
-  const rulebookBytes = fs.readFileSync(rulebookFile);
-  const baseRoot = ethers.keccak256(rulebookBytes);
-  const Governor = await ethers.deployContract("RuleBookGovernor", [baseRoot, "memory:unidroit-v1"]);
+  // RuleBook + RuleBookGovernor: registry of articles + open-vote
+  // governance. Deployer is the initial RuleBook governor so the seed
+  // script can populate articles in one signer; after seeding it
+  // transfers governorship to RuleBookGovernor. Article bodies live as
+  // ENS text records on chapter-X-Y.rulebook.tribunal.eth.
+  const RB = await ethers.deployContract("RuleBook", [await deployer.getAddress()]);
+  await RB.waitForDeployment();
+  const Governor = await ethers.deployContract("RuleBookGovernor", [await RB.getAddress()]);
   await Governor.waitForDeployment();
 
   const out = {
@@ -71,6 +72,7 @@ async function main() {
     TribunalEscrow: await TribunalEscrow.getAddress(),
     VerdictLog: await Verdict.getAddress(),
     JudgeINFT: await Judges.getAddress(),
+    RuleBook: await RB.getAddress(),
     RuleBookGovernor: await Governor.getAddress(),
   };
   console.log(JSON.stringify(out, null, 2));
