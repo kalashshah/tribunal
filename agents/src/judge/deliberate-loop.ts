@@ -170,9 +170,9 @@ export async function runDeliberateLoop(input: DeliberateInput): Promise<Deliber
       continue;
     }
 
-    // malformed: re-prompt once. After 2 consecutive malformeds, abort.
+    // malformed: re-prompt. After 3 consecutive malformeds, abort.
     malformedRetries += 1;
-    if (malformedRetries > 2) throw new Error("malformed output twice in a row");
+    if (malformedRetries > 2) throw new Error("malformed output 3 times in a row");
     conversation.push({ role: "assistant", content: out.text });
     conversation.push({ role: "user", content:
       "Your previous response did not start with LOOKUP: or RULE:. Re-emit a valid line." });

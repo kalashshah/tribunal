@@ -93,4 +93,41 @@ describe("runDeliberateLoop", () => {
       toc, lookupArticle: lookup, maxLookups: 2, maxArticles: 5,
     })).rejects.toThrow(/exceeded max lookups/);
   });
+
+  it("aborts after 3 consecutive malformed responses", async () => {
+    const llm = { complete: vi.fn(async () => ({ text: "uhh let me think", receipt: { hash: "0xm", url: "u" } } as any)) };
+    await expect(runDeliberateLoop({
+      llm: llm as any, systemBase: "s", transcript: "t",
+      toc, lookupArticle: lookup, maxLookups: 5, maxArticles: 5,
+    })).rejects.toThrow(/3 times in a row/);
+  });
+
+  it("allows maxLookups LOOKUPs followed by a RULE", async () => {
+    const responses = [
+      { text: "LOOKUP: 7.4.2",                                          receipt: { hash: "0x1", url: "u" } },
+      { text: "LOOKUP: 1.7",                                            receipt: { hash: "0x2", url: "u" } },
+      { text: 'RULE: {"prevailingIsAccuser":true,"opinion":"o"}',        receipt: { hash: "0x3", url: "u" } },
+    ];
+    let i = 0;
+    const llm = { complete: vi.fn(async () => responses[i++] as any) };
+    const out = await runDeliberateLoop({
+      llm: llm as any, systemBase: "s", transcript: "t",
+      toc, lookupArticle: lookup, maxLookups: 2, maxArticles: 5,
+    });
+    expect(out.chain.length).toBe(3);
+    expect(out.chain.map((s) => s.kind)).toEqual(["lookup", "lookup", "rule"]);
+  });
+
+  it("parses RULE blocks with trailing prose after the JSON", async () => {
+    const responses = [
+      { text: 'RULE: {"prevailingIsAccuser":false,"opinion":"o"} thanks!', receipt: { hash: "0xr", url: "u" } },
+    ];
+    let i = 0;
+    const llm = { complete: vi.fn(async () => responses[i++] as any) };
+    const out = await runDeliberateLoop({
+      llm: llm as any, systemBase: "s", transcript: "t",
+      toc, lookupArticle: lookup, maxLookups: 2, maxArticles: 5,
+    });
+    expect(out.ruling.prevailingIsAccuser).toBe(false);
+  });
 });
