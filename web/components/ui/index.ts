@@ -6,6 +6,8 @@ export { Button } from "./Button";
 export { Card } from "./Card";
 export { CardGrid } from "./CardGrid";
 export { Eyebrow } from "./Eyebrow";
+export { Faq } from "./Faq";
+export type { FaqItem } from "./Faq";
 export { Hero } from "./Hero";
 export { HeroFrame } from "./HeroFrame";
 export { PageHeader } from "./PageHeader";

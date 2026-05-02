@@ -22,8 +22,8 @@ describe("defaultDemoScripts", () => {
 
   it("produces an accuser-lawyer opening", async () => {
     const r = await llm.complete({
-      system: "You are a lawyer for the accuser in an AI court...",
-      messages: [{ role: "user", content: "Provide your opening statement." }],
+      system: "You are an experienced trial lawyer representing the accuser in the Tribunal AI court.",
+      messages: [{ role: "user", content: "Opening statement. Use only confirmed facts." }],
     });
     expect(r.text).toMatch(/CLAIM:/);
     expect(r.text).toMatch(/CONCLUSION:/);
@@ -31,8 +31,8 @@ describe("defaultDemoScripts", () => {
 
   it("produces a defendant-lawyer rebuttal that references the opposing argument", async () => {
     const r = await llm.complete({
-      system: "You are a lawyer for the defendant in an AI court...",
-      messages: [{ role: "user", content: "Opposing argument:\nfoo\n\nRebut." }],
+      system: "You are an experienced trial lawyer representing the defendant in the Tribunal AI court.",
+      messages: [{ role: "user", content: "The accuser just argued:\nfoo\n\nRebut." }],
     });
     expect(r.text).toMatch(/CLAIM:/);
   });

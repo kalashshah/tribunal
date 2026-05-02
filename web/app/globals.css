@@ -150,6 +150,44 @@ main { padding: 48px clamp(20px, 5vw, 56px); max-width: 1080px; margin: 0 auto; 
 }
 .explorer-link:hover .explorer-link-arrow { opacity: 1; }
 
+/* ---- faq ---- */
+.faq { display: flex; flex-direction: column; gap: 0; }
+.faq-item {
+  border-top: 1px solid var(--line-soft);
+}
+.faq-item:last-child { border-bottom: 1px solid var(--line-soft); }
+.faq-q {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+  padding: 18px 4px;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.2rem;
+  color: var(--ink);
+  transition: color 120ms ease;
+}
+.faq-q::-webkit-details-marker { display: none; }
+.faq-q:hover { color: var(--terracotta-deep); }
+.faq-mark {
+  font-family: var(--font-body);
+  font-size: 1.1rem;
+  color: var(--muted);
+  transition: transform 160ms ease, color 120ms ease;
+  flex-shrink: 0;
+}
+.faq-item[open] .faq-mark { transform: rotate(45deg); color: var(--terracotta-deep); }
+.faq-a {
+  padding: 0 4px 20px;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+.faq-a p { margin: 0 0 0.8em; }
+.faq-a p:last-child { margin-bottom: 0; }
+.faq-a code { font-size: 0.88em; }
+
 /* ---- shared surfaces ---- */
 .card {
   background: var(--paper);
