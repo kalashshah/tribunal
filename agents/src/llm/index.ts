@@ -77,10 +77,12 @@ function buildCanned(): PickLlmResult {
 
 function buildRee(envPrefix: "" | "JUDGE_" = ""): PickLlmResult {
   const baseUrl = process.env[`${envPrefix}REE_URL`] ?? process.env.REE_URL ?? "http://127.0.0.1:9000";
-  const model   = process.env[`${envPrefix}REE_MODEL`] ?? process.env.REE_MODEL ?? "llama-3.2-3b-instruct";
+  const model   = process.env[`${envPrefix}REE_MODEL`] ?? process.env.REE_MODEL ?? "Qwen/Qwen2.5-0.5B-Instruct";
   const apiToken = process.env[`${envPrefix}REE_TOKEN`] ?? process.env.REE_TOKEN;
+  const capRaw = process.env[`${envPrefix}REE_MAX_TOKENS`] ?? process.env.REE_MAX_TOKENS;
+  const maxTokensCap = capRaw ? Number(capRaw) || 512 : 512;
   return {
-    llm: createReeLlm({ baseUrl, model, apiToken }),
+    llm: createReeLlm({ baseUrl, model, apiToken, maxTokensCap }),
     provider: "ree",
     model,
   };

@@ -21,21 +21,36 @@ export interface CreateReeOpts {
   model: string;
   /// Optional bearer token if the enclave service requires auth.
   apiToken?: string;
-  /// Request timeout in ms. REE in reproducible mode is slow on CPU —
-  /// default is generous.
+  /// Request timeout in ms. REE on CPU is slow: cold calls (first time
+  /// for a given model) export ONNX and compile MLIR (~5min on Qwen
+  /// 0.5B, ~30min on 8B). Subsequent calls reuse the artifacts.
+  /// Default 30 minutes covers cold + warm.
   timeoutMs?: number;
+  /// Hard cap on max-new-tokens passed to REE. CPU inference is ~2–3s
+  /// per token, so a 256-token call is several minutes. The judge
+  /// produces JSON with a short opinion, so a cap of ~96 keeps demo
+  /// runs tractable. Caller-supplied maxTokens still applies; we take
+  /// the min.
+  maxTokensCap?: number;
   fetchImpl?: typeof fetch;
 }
 
 export function createReeLlm(opts: CreateReeOpts): Llm {
   const f = opts.fetchImpl ?? fetch;
   const baseUrl = (opts.baseUrl ?? "http://127.0.0.1:9000").replace(/\/$/, "");
-  const timeoutMs = opts.timeoutMs ?? 180_000;
+  const timeoutMs = opts.timeoutMs ?? 30 * 60_000;
+  const cap = opts.maxTokensCap;
 
   return {
     async complete(args: CompleteArgs): Promise<CompleteResult> {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      const requested = args.maxTokens;
+      const capped = cap === undefined
+        ? requested
+        : requested === undefined
+        ? cap
+        : Math.min(requested, cap);
       try {
         const res = await f(`${baseUrl}/complete`, {
           method: "POST",
@@ -48,7 +63,7 @@ export function createReeLlm(opts: CreateReeOpts): Llm {
             model: opts.model,
             system: args.system,
             messages: args.messages,
-            maxTokens: args.maxTokens,
+            maxTokens: capped,
             responseFormat: args.responseFormat,
           }),
         });
