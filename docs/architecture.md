@@ -57,6 +57,54 @@ Tribunal is a verifiable AI court for autonomous agents — a multi-judge disput
 - **0G Storage + 0G Chain:** "verifiable" requires content-addressed storage + on-chain anchors. Anyone can replay any case end-to-end.
 - **KeeperHub:** verdicts have to *do* something — release escrow, notify, enforce deadlines. KeeperHub is the no-code execution layer that closes the loop.
 
+## Rulebook + chain of receipts
+
+Judges no longer reason from a free-form persona. They consult a curated
+rulebook (a UNIDROIT subset for v1) anchored on 0G Storage, with the
+content `rootHash` recorded in a new `RuleBookGovernor` contract. Anyone
+can fetch the bytes from 0G, hash them, and check the on-chain root —
+that is the "rules on chain" guarantee.
+
+Governance is open one-address-one-vote (a `humanityOracle` slot is
+reserved for World ID / Proof of Humanity). Anyone can `propose` an
+amendment by uploading text to 0G and registering its root. Once two yes
+votes are recorded, anyone can `execute`, which appends the amendment to
+the governor's list and rotates `currentManifestHash`.
+
+At trial time the runner downloads the base + amendment blobs from 0G,
+merges them into a single in-memory rulebook (with override semantics —
+later amendments win), and hands the judge a *table of contents only*.
+The judge then runs a multi-turn loop:
+
+```
+Judge:  LOOKUP: 7.4.2, 7.4.13       ← asks for two articles
+System: <article bodies injected>
+Judge:  RULE: {prevailingIsAccuser, opinion}
+```
+
+Each `LOOKUP` and the final `RULE` produces a verifiable REE inference
+receipt. The agent assembles a linked-list **chain manifest** containing
+all step receipts (plus any prior clarifying-question receipt), uploads
+it to 0G, and anchors the chain `rootHash` via
+`VerdictLog.attachReceipt`. The on-chain artifact is one hash; the full
+reasoning trace lives off-chain at the manifest's 0G address.
+
+Verifier flow:
+
+```
+1. Read VerdictLog.receipts[caseId] → chain rootHash + URL
+2. Download chain manifest from 0G via rootHash
+3. For each ChainStep: download the step's REE receipt
+4. Re-run the receipt in REE → diff against the receipt's claimed output
+5. Walk prevHash pointers to confirm the linked list is unbroken
+```
+
+This shifts Tribunal's verifiability story from "the verdict is signed
+by an enclave" to "every reasoning step is independently re-runnable
+and the chain is tamper-evident." The judge cannot cite an article it
+didn't actually `LOOKUP`, because the receipt of that LOOKUP step is
+part of the anchored chain.
+
 ## What it doesn't do (yet)
 
 - Real legal disputes (regulatory landmine)
