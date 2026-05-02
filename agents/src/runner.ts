@@ -34,6 +34,7 @@ dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 
 import { createAxlClient, subscribe } from "./transport/axl.js";
 import { pickLlmFromEnv, pickJudgeLlmFromEnv } from "./llm/index.js";
+import type { Llm } from "./llm/client.js";
 import { createTribunalClient } from "./chain/tribunal-client.js";
 import { createClerk } from "./roles/clerk.js";
 import { createLawyer } from "./roles/lawyer.js";
@@ -197,6 +198,21 @@ function decodeAccusationCid(cid: string): string {
   return cid;
 }
 
+async function preWarmJudgeLlm(llm: Llm, label: string) {
+  if (process.env.LLM_JUDGE !== "ree") return;
+  const start = Date.now();
+  console.log(`[runner] pre-warming REE judge model (${label})…`);
+  try {
+    await llm.complete({
+      system: "Respond with exactly OK.",
+      messages: [{ role: "user", content: "ping" }],
+      maxTokens: 4,
+    });
+    console.log(`[runner] REE warm after ${(Date.now() - start) / 1000}s`);
+  } catch (e) {
+    console.warn("[runner] REE pre-warm failed (will retry on first case):", (e as Error).message);
+  }
+}
 
 async function main() {
   const rpcUrl   = envOrThrow("OG_RPC_URL");
@@ -259,6 +275,7 @@ async function main() {
     console.log(`LLM judge: ${judgePicked.provider} (${judgePicked.model})`);
   }
   const judgeLlm = judgePicked.llm;
+  await preWarmJudgeLlm(judgeLlm, judgePicked.model);
 
   // AXL singletons.
   const axlBase = process.env.AXL_BASE_URL ?? "http://127.0.0.1";
