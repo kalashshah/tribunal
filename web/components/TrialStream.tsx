@@ -4,14 +4,8 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ExplorerLink } from "./ExplorerLink";
-import { DEPLOYMENT, ensApp, ogContract, ogTx, zgSubmission } from "../lib/explorer";
-
-function ensLinkFor(name: string): string | null {
-  return DEPLOYMENT.sepolia.subnames.includes(name as any)
-    || name === DEPLOYMENT.sepolia.parentDomain
-    ? ensApp(name)
-    : null;
-}
+import { ogContract, ogTx, zgSubmission } from "../lib/explorer";
+import { Who } from "./Who";
 
 interface StreamEvent {
   kind: string;
@@ -47,16 +41,25 @@ function sideOf(e: StreamEvent): "accuser" | "defendant" | "judge" {
   return "accuser";
 }
 
-function labelOf(e: StreamEvent): string {
+function labelOf(e: StreamEvent, all: StreamEvent[]): string {
   if (e.kind === "ruling") return "Verdict";
   if (e.kind === "briefing") return "Discovery brief";
   if (e.kind === "question") {
+    const asker = (e.meta?.askerSide as string) ?? "party";
     const target = (e.meta?.target as string) ?? "party";
-    return `Question for the ${target}`;
+    if (asker === "judge") return `Bench question to the ${target}`;
+    if (asker === target) return `Discovery — ${asker}'s counsel interviews the client`;
+    return `Cross-examination — ${asker} questions the ${target}`;
   }
   if (e.kind === "answer") {
-    const side = (e.meta?.answeringSide as string) ?? "party";
-    return `Answer from the ${side}`;
+    const answerer = (e.meta?.answeringSide as string) ?? "party";
+    const qid = e.meta?.questionId as string | undefined;
+    const q = qid ? all.find((x) => x.kind === "question" && x.meta?.questionId === qid) : undefined;
+    const askerSide = q?.meta?.askerSide as string | undefined;
+    if (!askerSide) return `Answer from the ${answerer}`;
+    if (askerSide === "judge") return `Answer from the ${answerer} to the bench`;
+    if (askerSide === answerer) return `Discovery answer from the ${answerer}`;
+    return `Answer from the ${answerer} to the ${askerSide}`;
   }
   const side = sideOf(e);
   if (side === "judge") return "Bench";
@@ -116,15 +119,11 @@ export function TrialStream({ caseId }: { caseId: string }) {
                 <div className="timeline-meta">
                   <span className="timeline-when">{fmtTime(e.timestamp)}</span>
                   <span className="timeline-sep">·</span>
-                  <span className="timeline-label">{labelOf(e)}</span>
+                  <span className="timeline-label">{labelOf(e, events)}</span>
                 </div>
                 <div className="card timeline-card">
                   <div className="timeline-who">
-                    {ensLinkFor(e.from) ? (
-                      <ExplorerLink href={ensLinkFor(e.from)!}>{e.from}</ExplorerLink>
-                    ) : (
-                      e.from
-                    )}
+                    <Who from={e.from} />
                   </div>
                   <div className="md">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -134,7 +133,7 @@ export function TrialStream({ caseId }: { caseId: string }) {
                   <div className="timeline-anchors">
                     {e.anchorTxHash ? (
                       <ExplorerLink href={ogTx(e.anchorTxHash)} title={e.anchorTxHash}>
-                        anchor tx
+                        on-chain record
                       </ExplorerLink>
                     ) : (
                       <span className="anchor-pending" title={e.persistError ?? "pending"}>
@@ -153,7 +152,7 @@ export function TrialStream({ caseId }: { caseId: string }) {
                       <>
                         <span className="anchor-sep">·</span>
                         <ExplorerLink href={ogTx(e.storageTxHash)} title={e.storageTxHash}>
-                          submit tx
+                          storage tx
                         </ExplorerLink>
                       </>
                     )}
