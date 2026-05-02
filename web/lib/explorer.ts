@@ -13,11 +13,12 @@ export const DEPLOYMENT = {
     explorer: OG_EXPLORER,
     deployer: "0x369db11Fbdfe58e307B35776c4b7Fca4AE7eA0C4",
     contracts: {
-      AgentRegistry: "0x1B32D545e91a1dD11efb5B8e8336369103C4Cc4C",
-      TribunalCore:  "0xC434C901a184c06Bb8911708B65267bD4e6A68a7",
-      EscrowAdapter: "0xE673BAF7C25A7B42e62C668B1562aDA81311F93d",
-      VerdictLog:    "0xDBffDCc253Da588549C4d82167d1d5100D9a050a",
-      JudgeINFT:     "0x1Bb3C9f7315A3E7787174f9Ddd516cF45DdF08d4",
+      AgentRegistry:    "0x1B32D545e91a1dD11efb5B8e8336369103C4Cc4C",
+      TribunalCore:     "0xC434C901a184c06Bb8911708B65267bD4e6A68a7",
+      EscrowAdapter:    "0xE673BAF7C25A7B42e62C668B1562aDA81311F93d",
+      VerdictLog:       "0xDBffDCc253Da588549C4d82167d1d5100D9a050a",
+      JudgeINFT:        "0x1Bb3C9f7315A3E7787174f9Ddd516cF45DdF08d4",
+      RuleBookGovernor: "0x0000000000000000000000000000000000000000",
     },
   },
   sepolia: {

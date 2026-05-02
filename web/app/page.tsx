@@ -18,6 +18,7 @@ export default function Home() {
           <>
             <Button href="/case/1">Open courtroom</Button>
             <Button href="/judges" variant="ghost">Meet the bench</Button>
+            <Button href="/rulebook" variant="ghost">Rulebook</Button>
           </>
         }
       />
