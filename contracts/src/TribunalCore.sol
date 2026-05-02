@@ -15,6 +15,7 @@ interface IEscrow {
 
 interface IVerdictLog {
     function post(uint256 caseId, bool prevailingIsAccuser, bytes32 opinionRoot) external;
+    function attachReceipt(uint256 caseId, bytes32 receiptHash, string calldata receiptUrl) external;
 }
 
 /// @title TribunalCore
@@ -126,6 +127,26 @@ contract TribunalCore is ITribunal, Ownable {
         Case storage c = cases[id];
         require(c.status == CaseStatus.Ruled, "not ruled");
         IVerdictLog(verdictLog).post(id, c.prevailingIsAccuser, opinionRoot);
+        c.status = CaseStatus.Settled;
+    }
+
+    /// Like `finalizeVerdict`, plus attaches a verifiable-inference receipt
+    /// (REE) to the VerdictLog in the same tx. Empty `receiptUrl` and zero
+    /// `receiptHash` skip the attachment, so callers without a receipt can
+    /// still use this single entrypoint.
+    function finalizeVerdictWithReceipt(
+        uint256 id,
+        address verdictLog,
+        bytes32 opinionRoot,
+        bytes32 receiptHash,
+        string calldata receiptUrl
+    ) external onlyRunner {
+        Case storage c = cases[id];
+        require(c.status == CaseStatus.Ruled, "not ruled");
+        IVerdictLog(verdictLog).post(id, c.prevailingIsAccuser, opinionRoot);
+        if (receiptHash != bytes32(0) && bytes(receiptUrl).length > 0) {
+            IVerdictLog(verdictLog).attachReceipt(id, receiptHash, receiptUrl);
+        }
         c.status = CaseStatus.Settled;
     }
 

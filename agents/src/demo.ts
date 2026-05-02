@@ -30,7 +30,7 @@ dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 
 import { createInMemoryBus } from "./transport/in-memory.js";
 import { createAxlClient, subscribe, type AxlClient } from "./transport/axl.js";
-import { pickLlmFromEnv } from "./llm/index.js";
+import { pickLlmFromEnv, pickJudgeLlmFromEnv } from "./llm/index.js";
 import { createTribunalClient } from "./chain/tribunal-client.js";
 import { createClerk } from "./roles/clerk.js";
 import { createLawyer } from "./roles/lawyer.js";
@@ -194,9 +194,18 @@ async function main() {
     judgeAxl   = bus.newClient("JUDGE");
     clerkPeer  = "CLERK";
   }
+  // Lawyers/parties: cheap+fast provider (OpenAI/OpenRouter).
+  // Judge: separately picked, defaults to the same as lawyers but can be
+  // forced to REE via JUDGE_LLM_PROVIDER=ree for verifiable inference
+  // (yields a receipt that gets attached on-chain).
   const picked = pickLlmFromEnv();
-  log("llm", `using ${picked.provider} (${picked.model})`);
+  log("llm", `lawyers using ${picked.provider} (${picked.model})`);
   const llm = picked.llm;
+  const judgePicked = pickJudgeLlmFromEnv();
+  if (judgePicked.provider !== picked.provider || judgePicked.model !== picked.model) {
+    log("llm", `judge using ${judgePicked.provider} (${judgePicked.model})`);
+  }
+  const judgeLlm = judgePicked.llm;
   const storage = inMemoryStorage();
 
   const tribunal = createTribunalClient({
@@ -275,7 +284,7 @@ async function main() {
     tokenId: judgeTokenId,
     personaPrompt: "You are a careful textualist.",
     priorRulings: [],
-    llm,
+    llm: judgeLlm,
     axl: judgeAxl,
     tribunal: tribunalForJudge,
     clerkPeerId: clerkPeer,
@@ -318,8 +327,15 @@ async function main() {
 
   // Post verdict + mark settled in a single tx via TribunalCore (would
   // normally be triggered by KeeperHub on the production deployment).
+  // If the judge ran on REE, attach the inference receipt on-chain in the
+  // same tx so anyone can re-verify the verdict.
   const opinionRoot = ethers.keccak256(ethers.toUtf8Bytes(ruling.opinion)) as `0x${string}`;
-  await tribunal.finalizeVerdict(caseId, dep.VerdictLog, opinionRoot);
+  if (ruling.receipt) {
+    log("verdict", `attaching REE receipt ${ruling.receipt.hash.slice(0, 10)}…`);
+    await tribunal.finalizeVerdictWithReceipt(caseId, dep.VerdictLog, opinionRoot, ruling.receipt);
+  } else {
+    await tribunal.finalizeVerdict(caseId, dep.VerdictLog, opinionRoot);
+  }
 
   stopSubscribe();
 

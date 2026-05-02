@@ -37,6 +37,9 @@ export interface JudgeArgs {
 export interface Ruling {
   prevailingIsAccuser: boolean;
   opinion: string;
+  /// Receipt from a verifiable inference backend (REE), if the LLM
+  /// produced one. Absent for OpenRouter/OpenAI/Anthropic backends.
+  receipt?: { hash: `0x${string}`; url: string };
 }
 
 const SYSTEM = (persona: string, prior: string[], docketText: string) =>
@@ -163,6 +166,7 @@ export function createJudge(a: JudgeArgs): Judge {
     async deliberateAndRule(transcriptText) {
       // Up to 3 attempts: free models occasionally return malformed JSON.
       let ruling: Ruling | undefined;
+      let receipt: { hash: `0x${string}`; url: string } | undefined;
       let lastError: unknown;
       for (let attempt = 1; attempt <= 3; attempt++) {
         const out = await a.llm.complete({
@@ -174,6 +178,10 @@ export function createJudge(a: JudgeArgs): Judge {
         });
         try {
           ruling = parseRuling(out.text);
+          // Only attach the receipt from the *successful* attempt — earlier
+          // tries that produced malformed JSON aren't the verdict the panel
+          // anchors.
+          if (out.receipt) receipt = out.receipt;
           break;
         } catch (e) {
           lastError = e;
@@ -183,6 +191,7 @@ export function createJudge(a: JudgeArgs): Judge {
         }
       }
       if (!ruling) throw lastError ?? new Error("ruling could not be parsed");
+      if (receipt) ruling.receipt = receipt;
       const opinionHash = keccak256(toUtf8Bytes(ruling.opinion)) as `0x${string}`;
 
       await a.axl.send(a.clerkPeerId, {
@@ -192,6 +201,7 @@ export function createJudge(a: JudgeArgs): Judge {
         meta: {
           prevailingIsAccuser: ruling.prevailingIsAccuser,
           caseId: a.caseId.toString(),
+          ...(receipt ? { receiptHash: receipt.hash, receiptUrl: receipt.url } : {}),
         },
       });
       await a.tribunal.submitRuling(a.caseId, ruling.prevailingIsAccuser, opinionHash);

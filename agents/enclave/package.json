@@ -1,0 +1,21 @@
+{
+  "name": "tribunal-enclave",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Judge enclave service. Wraps Gensyn REE and exposes a /complete endpoint that returns verifiable inference receipts for the Tribunal judge agent.",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "ethers": "^6.13.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.6.0"
+  }
+}

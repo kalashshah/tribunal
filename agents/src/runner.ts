@@ -33,7 +33,7 @@ import { ethers, JsonRpcProvider, NonceManager, Wallet } from "ethers";
 dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.env") });
 
 import { createAxlClient, subscribe } from "./transport/axl.js";
-import { pickLlmFromEnv } from "./llm/index.js";
+import { pickLlmFromEnv, pickJudgeLlmFromEnv } from "./llm/index.js";
 import { createTribunalClient } from "./chain/tribunal-client.js";
 import { createClerk } from "./roles/clerk.js";
 import { createLawyer } from "./roles/lawyer.js";
@@ -252,8 +252,13 @@ async function main() {
   });
 
   const picked = pickLlmFromEnv();
-  console.log(`LLM: ${picked.provider} (${picked.model})`);
+  console.log(`LLM lawyers: ${picked.provider} (${picked.model})`);
   const llm = picked.llm;
+  const judgePicked = pickJudgeLlmFromEnv();
+  if (judgePicked.provider !== picked.provider || judgePicked.model !== picked.model) {
+    console.log(`LLM judge: ${judgePicked.provider} (${judgePicked.model})`);
+  }
+  const judgeLlm = judgePicked.llm;
 
   // AXL singletons.
   const axlBase = process.env.AXL_BASE_URL ?? "http://127.0.0.1";
@@ -435,11 +440,11 @@ async function main() {
         personaPrompt:
           "You are a careful textualist judge. Rule on what was actually written and demonstrably true, not on what parties wished was true.",
         priorRulings: [],
-        llm,
+        llm: judgeLlm,
         axl: judgeAxl,
         tribunal: tribunalForJudge,
         clerkPeerId: clerkPeer,
-        model: picked.model,
+        model: judgePicked.model,
         partyEns,
         partyAgents: { accuser: accuserPartyAgent, defendant: defendantPartyAgent },
         getTranscript: () => clerk.render(),
@@ -499,13 +504,21 @@ async function main() {
       console.log("Verdict:", ruling.prevailingIsAccuser ? "for accuser" : "for defendant");
 
       const opinionRoot = ethers.keccak256(ethers.toUtf8Bytes(ruling.opinion)) as `0x${string}`;
-      const finalize = await tribunal.finalizeVerdict(caseId, addr.VerdictLog, opinionRoot);
-      console.log(`Posted verdict + settled case ${key} (tx ${finalize.txHash})`);
+      const finalize = ruling.receipt
+        ? await tribunal.finalizeVerdictWithReceipt(caseId, addr.VerdictLog, opinionRoot, ruling.receipt)
+        : await tribunal.finalizeVerdict(caseId, addr.VerdictLog, opinionRoot);
+      if (ruling.receipt) {
+        console.log(`Posted verdict + settled case ${key} (tx ${finalize.txHash}, REE receipt ${ruling.receipt.hash.slice(0, 10)}…)`);
+      } else {
+        console.log(`Posted verdict + settled case ${key} (tx ${finalize.txHash})`);
+      }
       const verdictMetaPath = path.resolve(__dirname, `../../.verdict-${key}.json`);
       fs.writeFileSync(verdictMetaPath, JSON.stringify({
         finalizeTxHash: finalize.txHash,
         opinionRoot,
         prevailingIsAccuser: ruling.prevailingIsAccuser,
+        receiptHash: ruling.receipt?.hash,
+        receiptUrl: ruling.receipt?.url,
       }) + "\n");
 
       // Auto-settle the linked TribunalEscrow (if any) so funds move on the

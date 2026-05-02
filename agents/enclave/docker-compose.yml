@@ -1,0 +1,41 @@
+# Local Tribunal judge enclave + Gensyn REE container.
+#
+# Quick start (mock REE, no GPU, no model download — fastest path):
+#   MOCK_ATTESTATION=1 docker compose up enclave
+#   curl localhost:9000/health
+#
+# Full path (real REE on CPU; slow but produces real receipts):
+#   docker compose --profile real up
+#   # then point the agents runner at it:
+#   JUDGE_LLM_PROVIDER=ree REE_URL=http://127.0.0.1:9000 pnpm demo
+#
+# Real path with GPU: drop --cpu-only and add `runtime: nvidia` + a
+# `deploy.resources.reservations.devices` block under the `ree` service.
+
+services:
+  ree:
+    image: gensyn/ree:latest
+    profiles: ["real"]
+    command: ["--cpu-only", "--serve", "--port", "8088"]
+    ports: ["8088:8088"]
+    volumes:
+      - ree-cache:/root/.cache/ree
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8088/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  enclave:
+    build: .
+    environment:
+      PORT: "9000"
+      REE_URL: "http://ree:8088"
+      MOCK_ATTESTATION: "${MOCK_ATTESTATION:-1}"
+      RECEIPT_BASE_URL: "${RECEIPT_BASE_URL:-http://127.0.0.1:9000}"
+      ENCLAVE_PRIVKEY: "${ENCLAVE_PRIVKEY:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}"
+      REE_MODEL: "${REE_MODEL:-llama-3.2-3b-instruct}"
+    ports: ["9000:9000"]
+
+volumes:
+  ree-cache:

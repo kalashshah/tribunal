@@ -12,10 +12,20 @@ export interface CompleteArgs {
   responseFormat?: "json";
 }
 
+/// Cryptographic receipt produced by a verifiable inference backend (REE).
+/// `hash` is the keccak256 of the receipt blob; `url` points at the blob
+/// (IPFS, S3, or the enclave's local /receipts endpoint). Backends without
+/// verifiable inference omit this field entirely.
+export interface CompletionReceipt {
+  hash: `0x${string}`;
+  url: string;
+}
+
 export interface CompleteResult {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  receipt?: CompletionReceipt;
 }
 
 export interface Llm {
