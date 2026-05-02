@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Cormorant_Garamond, Inter } from "next/font/google";
 import "./globals.css";
-import { DEPLOYMENT, ogAddr, ensApp, shortAddr } from "../lib/explorer";
+import { DEPLOYMENT, ogAddr, shortAddr } from "../lib/explorer";
 import { ExplorerLink } from "../components/ExplorerLink";
 
 const display = Cormorant_Garamond({
@@ -35,6 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <nav>
             <a href="/judges">Judges</a>
             <a href="/rulebook">Rulebook</a>
+            <a href="/governance">Governance</a>
           </nav>
         </header>
         <main>{children}</main>
@@ -47,23 +48,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <span className="label">{name}</span>
                 <ExplorerLink href={ogAddr(addr)} title={addr}>
                   <code>{shortAddr(addr)}</code>
-                </ExplorerLink>
-              </div>
-            ))}
-          </div>
-          <p className="footer-deployments-label">Identity &middot; {DEPLOYMENT.sepolia.name}</p>
-          <div className="footer-deployments">
-            <div className="footer-deployments-row">
-              <span className="label">Parent domain</span>
-              <ExplorerLink href={ensApp(DEPLOYMENT.sepolia.parentDomain)}>
-                <code>{DEPLOYMENT.sepolia.parentDomain}</code>
-              </ExplorerLink>
-            </div>
-            {DEPLOYMENT.sepolia.subnames.map((n) => (
-              <div className="footer-deployments-row" key={n}>
-                <span className="label">{n.split(".")[0]}</span>
-                <ExplorerLink href={ensApp(n)}>
-                  <code>{n}</code>
                 </ExplorerLink>
               </div>
             ))}

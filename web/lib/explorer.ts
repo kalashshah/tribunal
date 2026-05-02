@@ -18,7 +18,8 @@ export const DEPLOYMENT = {
       EscrowAdapter:    "0xE673BAF7C25A7B42e62C668B1562aDA81311F93d",
       VerdictLog:       "0xDBffDCc253Da588549C4d82167d1d5100D9a050a",
       JudgeINFT:        "0x1Bb3C9f7315A3E7787174f9Ddd516cF45DdF08d4",
-      RuleBookGovernor: "0x0000000000000000000000000000000000000000",
+      RuleBook:         "0x33D6854B4b5ED93F5D4AA7D5f57AA503a41987DA",
+      RuleBookGovernor: "0x88da4E565E326Dc258cA56776C8F9821f268D6f5",
     },
   },
   sepolia: {

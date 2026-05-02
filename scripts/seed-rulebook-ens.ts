@@ -92,10 +92,13 @@ async function main() {
     return raw.startsWith("0x") ? raw : `0x${raw}`;
   })();
 
-  // Load deployment.
-  const dep = JSON.parse(
-    fs.readFileSync(path.resolve(__dirname, "../docs/deployment.json"), "utf8"),
-  );
+  // Load deployment. RULEBOOK_DEPLOYMENT_FILE lets the caller pin a
+  // specific JSON (e.g. docs/rulebook-deployment.json for 0G Galileo);
+  // default is docs/deployment.json (local hardhat).
+  const depFile = process.env.RULEBOOK_DEPLOYMENT_FILE
+    ? path.resolve(__dirname, "..", process.env.RULEBOOK_DEPLOYMENT_FILE)
+    : path.resolve(__dirname, "../docs/deployment.json");
+  const dep = JSON.parse(fs.readFileSync(depFile, "utf8"));
   if (!dep.RuleBook || !dep.RuleBookGovernor) {
     throw new Error("RuleBook / RuleBookGovernor missing from docs/deployment.json. Re-run deploy.");
   }

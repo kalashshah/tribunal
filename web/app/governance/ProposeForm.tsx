@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { Button } from "../../components/ui";
 
 // Propose a new article for the rulebook. The ENS subname for the article
 // (chapter-X-Y.rulebook.tribunal.eth) must already be published on Sepolia
@@ -63,9 +64,12 @@ export function ProposeForm({ onDone }: { onDone: () => void }) {
         ENS subname (must exist on Sepolia with a <code>description</code> record):
         {" "}<code>{ensPreview}</code>
       </p>
-      <button disabled={busy || !title.trim() || !articleId.trim() || !chapter.trim()} className="border px-3 py-1">
+      <Button
+        type="submit"
+        disabled={busy || !title.trim() || !articleId.trim() || !chapter.trim()}
+      >
         {busy ? "Submitting…" : "Propose"}
-      </button>
+      </Button>
       {err && <p className="text-red-600 text-sm">{err}</p>}
       {ok && (
         <p className="text-sm text-green-700">

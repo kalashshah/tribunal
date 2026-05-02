@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import styles from "./article.module.css";
 
 interface Article {
   id: string;
@@ -24,7 +25,6 @@ const ENS_APP = "https://sepolia.app.ens.domains";
 
 export function ArticleList() {
   const [d, setD] = useState<Articles | null>(null);
-  const [open, setOpen] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch("/api/rulebook/articles").then((r) => r.json()).then(setD);
@@ -34,85 +34,89 @@ export function ArticleList() {
   if (!d.articles?.length) {
     return (
       <p className="text-sm opacity-70">
-        Registry is empty. Run the seed script (<code>contracts/scripts/seed-rulebook.ts</code>)
-        to publish ENS subnames and add articles.
+        Registry is empty. Run <code>scripts/seed-rulebook-ens.ts</code> to
+        publish ENS subnames and add articles.
       </p>
     );
   }
 
-  function toggle(id: string) {
-    const next = new Set(open);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    setOpen(next);
-  }
-
   return (
     <div>
-      <p className="text-sm">
-        {d.articleCount} on-chain · <strong>{d.resolvedCount}</strong> resolved from ENS
-        {d.resolvedCount === d.articleCount ? (
-          <> · <span title="all namehashes resolved a description text record">✓ <em>fully resolved</em></span></>
-        ) : (
-          <> · <span style={{ color: "#c00" }}>✗ {d.articleCount - d.resolvedCount} unresolved</span></>
-        )}
-        {d.cached && <> · <em className="opacity-60">cached</em></>}
-      </p>
-      <table className="w-full mt-3 text-sm">
-        <thead>
-          <tr className="text-left">
-            <th className="pr-4 py-1">Art.</th>
-            <th className="pr-4 py-1">Title</th>
-            <th className="pr-4 py-1">ENS name</th>
-            <th className="py-1"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {d.articles.map((a) => (
-            <Row key={a.id} a={a} isOpen={open.has(a.id)} onToggle={() => toggle(a.id)} />
-          ))}
-        </tbody>
-      </table>
+      <div className="mt-3" style={{ width: "100%" }}>
+        {d.articles.map((a) => (
+          <ArticleRow key={a.id} a={a} />
+        ))}
+      </div>
     </div>
   );
 }
 
-function Row({ a, isOpen, onToggle }: { a: Article; isOpen: boolean; onToggle: () => void }) {
+function ArticleRow({ a }: { a: Article }) {
+  const disabled = !a.resolved;
   return (
-    <>
-      <tr className="border-t" style={{ borderColor: "var(--rule, #ddd)" }}>
-        <td className="pr-4 py-1 align-top"><code>{a.id}</code></td>
-        <td className="pr-4 py-1 align-top">
+    <details
+      className={`${styles.article} border-t`}
+      style={{ borderColor: "var(--rule, #ddd)", width: "100%" }}
+    >
+      <summary
+        style={{
+          cursor: disabled ? "default" : "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.75rem",
+          padding: "0.5rem 0",
+          width: "100%",
+          minWidth: 0,
+        }}
+        onClick={disabled ? (e) => e.preventDefault() : undefined}
+      >
+        <span aria-hidden className={styles.chevron}>
+          {disabled ? "" : "▸"}
+        </span>
+        <code style={{ flexShrink: 0, width: "4rem" }}>{a.id}</code>
+        <span style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {a.title}
           {!a.resolved && (
-            <span title={a.reason} className="ml-2" style={{ color: "#c00", fontSize: "0.85em" }}>
+            <span title={a.reason} style={{ color: "#c00", fontSize: "0.85em", marginLeft: "0.5rem" }}>
               ⚠ unresolved
             </span>
           )}
-        </td>
-        <td className="pr-4 py-1 align-top">
-          <a
-            href={`${ENS_APP}/${a.ensName}`}
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-            style={{ fontFamily: "monospace", fontSize: "0.85em" }}
-          >
-            {a.ensName}
-          </a>
-        </td>
-        <td className="py-1 align-top">
-          <button onClick={onToggle} className="text-xs underline opacity-70" disabled={!a.resolved}>
-            {isOpen ? "hide" : "read"}
-          </button>
-        </td>
-      </tr>
-      {isOpen && a.resolved && (
-        <tr>
-          <td colSpan={4} className="pb-3 pl-4 pr-4 text-sm opacity-80">
-            {a.body}
-          </td>
-        </tr>
+        </span>
+        <a
+          href={`${ENS_APP}/${a.ensName}`}
+          target="_blank"
+          rel="noreferrer"
+          className="underline"
+          onClick={(e) => e.stopPropagation()}
+          title={a.ensName}
+          style={{
+            fontFamily: "monospace",
+            fontSize: "0.8em",
+            flexShrink: 0,
+            maxWidth: "16rem",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {a.ensName}
+        </a>
+      </summary>
+      {a.resolved && (
+        <p
+          style={{
+            paddingLeft: "6.75rem",
+            paddingRight: "1rem",
+            paddingBottom: "0.75rem",
+            fontSize: "0.875rem",
+            opacity: 0.8,
+            overflowWrap: "anywhere",
+            margin: 0,
+          }}
+        >
+          {a.body}
+        </p>
       )}
-    </>
+    </details>
   );
 }

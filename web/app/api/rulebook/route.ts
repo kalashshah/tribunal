@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { ethers } from "ethers";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { RULEBOOK_RPC_URL, RULEBOOK_ADDR, GOVERNOR_ADDR } from "../../../lib/rulebook-config";
 
 const GOVERNOR_ABI = [
   "function ruleBook() view returns (address)",
@@ -14,22 +13,13 @@ const RULEBOOK_ABI = [
   "function articleCount() view returns (uint256)",
 ];
 
-interface Deployment { RuleBook?: string; RuleBookGovernor?: string }
-
-function loadDeployment(): Deployment {
-  const p = path.resolve(process.cwd(), "../docs/deployment.json");
-  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return {}; }
-}
-
 export async function GET() {
-  const dep = loadDeployment();
-  if (!dep.RuleBookGovernor || !dep.RuleBook) {
-    return NextResponse.json({ error: "RuleBook / Governor address missing — re-run deploy" }, { status: 500 });
+  if (!GOVERNOR_ADDR || !RULEBOOK_ADDR || /^0x0+$/i.test(GOVERNOR_ADDR)) {
+    return NextResponse.json({ error: "RuleBook / Governor address not configured for 0G Galileo" }, { status: 500 });
   }
-  const rpc = process.env.WEB_RPC_URL ?? "http://127.0.0.1:8545";
-  const provider = new ethers.JsonRpcProvider(rpc);
-  const g  = new ethers.Contract(dep.RuleBookGovernor, GOVERNOR_ABI, provider);
-  const rb = new ethers.Contract(dep.RuleBook, RULEBOOK_ABI, provider);
+  const provider = new ethers.JsonRpcProvider(RULEBOOK_RPC_URL);
+  const g  = new ethers.Contract(GOVERNOR_ADDR, GOVERNOR_ABI, provider);
+  const rb = new ethers.Contract(RULEBOOK_ADDR, RULEBOOK_ABI, provider);
 
   const quorum = Number(await g.quorum());
   const articleCount = Number(await rb.articleCount());
@@ -40,12 +30,11 @@ export async function GET() {
     proposals.push({ id: i, ...p });
   }
 
-  // bigint → string for JSON
   const payload = JSON.parse(
     JSON.stringify(
       {
-        governor: dep.RuleBookGovernor,
-        ruleBook: dep.RuleBook,
+        governor: GOVERNOR_ADDR,
+        ruleBook: RULEBOOK_ADDR,
         quorum,
         articleCount,
         proposals,

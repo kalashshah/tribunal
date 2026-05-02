@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { ethers } from "ethers";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { RULEBOOK_RPC_URL, RULEBOOK_ADDR } from "../../../../lib/rulebook-config";
 
-// Reads the RuleBook registry on 0G + resolves each article's ENS namehash
-// on Sepolia to fetch its description (body) and tribunal.title (title)
-// text records. Articles are the source of truth: the registry says
-// which namehashes are canonical, and ENS supplies the content.
+// Reads the RuleBook registry on 0G Galileo + resolves each article's ENS
+// namehash on Sepolia to fetch its description (body) and tribunal.title
+// (title) text records. Articles are the source of truth: the registry
+// says which namehashes are canonical, and ENS supplies the content.
 
 const RULEBOOK_ABI = [
   "function articleCount() view returns (uint256)",
@@ -21,13 +20,6 @@ const RESOLVER_ABI = [
   "function text(bytes32 node, string key) view returns (string)",
 ];
 
-interface Deployment { RuleBook?: string }
-
-function loadDeployment(): Deployment {
-  const p = path.resolve(process.cwd(), "../docs/deployment.json");
-  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return {}; }
-}
-
 function ensNameFor(articleId: string): string {
   return `chapter-${articleId.replace(/\./g, "-")}.rulebook.tribunal.eth`;
 }
@@ -41,19 +33,17 @@ export async function GET() {
   if (cache && Date.now() - cache.at < CACHE_TTL) {
     return NextResponse.json({ ...cache.data, cached: true });
   }
-  const dep = loadDeployment();
-  if (!dep.RuleBook) {
-    return NextResponse.json({ error: "RuleBook address missing — re-run deploy" }, { status: 500 });
+  if (!RULEBOOK_ADDR || /^0x0+$/i.test(RULEBOOK_ADDR)) {
+    return NextResponse.json({ error: "RuleBook address not configured for 0G Galileo" }, { status: 500 });
   }
-  const ogRpc = process.env.WEB_RPC_URL ?? "http://127.0.0.1:8545";
   const ensRpc = process.env.WEB_ENS_RPC_URL ?? process.env.ENS_RPC_URL;
   if (!ensRpc) {
     return NextResponse.json({ error: "WEB_ENS_RPC_URL (or ENS_RPC_URL) not set" }, { status: 500 });
   }
 
-  const ogProvider = new ethers.JsonRpcProvider(ogRpc);
+  const ogProvider = new ethers.JsonRpcProvider(RULEBOOK_RPC_URL);
   const ensProvider = new ethers.JsonRpcProvider(ensRpc);
-  const rb = new ethers.Contract(dep.RuleBook, RULEBOOK_ABI, ogProvider);
+  const rb = new ethers.Contract(RULEBOOK_ADDR, RULEBOOK_ABI, ogProvider);
 
   const n = Number(await rb.articleCount());
   const entries: { articleId: string; ensNode: string; chapter: string }[] = [];
@@ -110,7 +100,7 @@ export async function GET() {
   }));
 
   const data = {
-    ruleBook: dep.RuleBook,
+    ruleBook: RULEBOOK_ADDR,
     articleCount: n,
     resolvedCount: articles.filter((a) => a.resolved).length,
     articles,

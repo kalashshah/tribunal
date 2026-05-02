@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { ethers } from "ethers";
 import { namehash } from "viem";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { RULEBOOK_RPC_URL, GOVERNOR_ADDR } from "../../../../lib/rulebook-config";
 
 // Propose a new article for the rulebook. Caller supplies:
 //   { title, articleId, chapter }
@@ -14,11 +13,6 @@ import * as path from "node:path";
 const ABI = [
   "function propose(string title, string articleId, bytes32 ensNode, string chapter) returns (uint256)",
 ];
-
-function loadAddr(): string {
-  const p = path.resolve(process.cwd(), "../docs/deployment.json");
-  return JSON.parse(fs.readFileSync(p, "utf8")).RuleBookGovernor;
-}
 
 function ensNameFor(articleId: string): string {
   return `chapter-${articleId.replace(/\./g, "-")}.rulebook.tribunal.eth`;
@@ -34,14 +28,19 @@ export async function POST(req: Request) {
   if (!/^\d+(\.\d+)*$/.test(articleId)) {
     return NextResponse.json({ error: "articleId must be dotted digits, e.g. 9.1.5" }, { status: 400 });
   }
+  if (!GOVERNOR_ADDR || /^0x0+$/i.test(GOVERNOR_ADDR)) {
+    return NextResponse.json({ error: "Governor address not configured for 0G Galileo" }, { status: 500 });
+  }
 
   const ensName = ensNameFor(articleId);
   const ensNode = namehash(ensName);
 
-  const rpc  = process.env.WEB_RPC_URL  ?? "http://127.0.0.1:8545";
-  const pk   = process.env.WEB_OPERATOR_PK!;
-  const wallet = new ethers.Wallet(pk, new ethers.JsonRpcProvider(rpc));
-  const g = new ethers.Contract(loadAddr(), ABI, wallet);
+  const pk = process.env.WEB_OPERATOR_PK;
+  if (!pk) {
+    return NextResponse.json({ error: "WEB_OPERATOR_PK not set (need a 0G-funded key to submit)" }, { status: 500 });
+  }
+  const wallet = new ethers.Wallet(pk, new ethers.JsonRpcProvider(RULEBOOK_RPC_URL));
+  const g = new ethers.Contract(GOVERNOR_ADDR, ABI, wallet);
   const tx = await g.propose(title, articleId, ensNode, chapter);
   const rc = await tx.wait();
   return NextResponse.json({ txHash: rc?.hash, articleId, ensName, ensNode, chapter });

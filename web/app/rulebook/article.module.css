@@ -1,0 +1,12 @@
+.article > summary { list-style: none; }
+.article > summary::-webkit-details-marker { display: none; }
+.article > summary::marker { content: ""; }
+.chevron {
+  display: inline-block;
+  width: 1rem;
+  color: var(--ink-soft);
+  font-size: 0.75em;
+  transition: transform 120ms ease;
+  flex-shrink: 0;
+}
+.article[open] .chevron { transform: rotate(90deg); }

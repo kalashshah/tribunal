@@ -15,7 +15,8 @@ Deployed: **2026-04-26**
 | EscrowAdapter    | `0xE673BAF7C25A7B42e62C668B1562aDA81311F93d` |
 | VerdictLog       | `0xDBffDCc253Da588549C4d82167d1d5100D9a050a` |
 | JudgeINFT        | `0x1Bb3C9f7315A3E7787174f9Ddd516cF45DdF08d4` |
-| RuleBookGovernor | _pending next 0G redeploy_                   |
+| RuleBook         | `0x33D6854B4b5ED93F5D4AA7D5f57AA503a41987DA` |
+| RuleBookGovernor | `0x88da4E565E326Dc258cA56776C8F9821f268D6f5` |
 
 Explorer links:
 - [AgentRegistry](https://chainscan-galileo.0g.ai/address/0x1B32D545e91a1dD11efb5B8e8336369103C4Cc4C)
@@ -23,6 +24,8 @@ Explorer links:
 - [EscrowAdapter](https://chainscan-galileo.0g.ai/address/0xE673BAF7C25A7B42e62C668B1562aDA81311F93d)
 - [VerdictLog](https://chainscan-galileo.0g.ai/address/0xDBffDCc253Da588549C4d82167d1d5100D9a050a)
 - [JudgeINFT](https://chainscan-galileo.0g.ai/address/0x1Bb3C9f7315A3E7787174f9Ddd516cF45DdF08d4)
+- [RuleBook](https://chainscan-galileo.0g.ai/address/0x33D6854B4b5ED93F5D4AA7D5f57AA503a41987DA)
+- [RuleBookGovernor](https://chainscan-galileo.0g.ai/address/0x88da4E565E326Dc258cA56776C8F9821f268D6f5)
 
 ### 0G Storage roots
 
