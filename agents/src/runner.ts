@@ -292,6 +292,17 @@ async function main() {
   const { storage, kind: storageKind } = await buildStorage(rpcUrl, operator);
   console.log(`Storage backend: ${storageKind}`);
 
+  // For the in-memory storage backend, deploy.ts only stores the rulebook's
+  // keccak hash in the contract — the bytes themselves are never uploaded.
+  // Hydrate them here so loadRulebook's storage.download(baseRoot) hits.
+  // In 0G mode the bytes live on the indexer (uploaded by seed-rulebook.ts).
+  if (storageKind === "memory") {
+    const seedFile = path.resolve(__dirname, "../../agents/enclave/rulebook/unidroit-v1.json");
+    if (fs.existsSync(seedFile)) {
+      await storage.upload(fs.readFileSync(seedFile));
+    }
+  }
+
   // ---- Rulebook (governor + 0G) ------------------------------------------
   const { loadRulebook } = await import("./judge/rulebook.js");
   const governorAddr = (addr as any).RuleBookGovernor;
