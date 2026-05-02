@@ -35,7 +35,7 @@ contract RuleBookGovernor {
     mapping(uint256 => mapping(address => bool)) private _voted;
 
     address public humanityOracle;     // address(0) = open voting
-    uint32  public quorum;             // simple yes-vote threshold
+    uint32  public immutable quorum;             // simple yes-vote threshold (set at construction)
 
     event Proposed(uint256 indexed id, address indexed proposer, string title, bytes32 cidRoot);
     event Voted(uint256 indexed id, address indexed voter, bool support);
@@ -67,6 +67,7 @@ contract RuleBookGovernor {
 
     function vote(uint256 id, bool support) external {
         require(id < _proposals.length, "no such proposal");
+        require(!_proposals[id].executed, "already executed");
         require(!_voted[id][msg.sender], "already voted");
         _voted[id][msg.sender] = true;
         if (support) _proposals[id].yes += 1; else _proposals[id].no += 1;

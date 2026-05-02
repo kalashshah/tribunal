@@ -63,4 +63,18 @@ describe("RuleBookGovernor", () => {
     await G.connect(a).execute(0);
     await expect(G.connect(a).execute(0)).to.be.revertedWith("already executed");
   });
+
+  it("rejects votes after execute", async () => {
+    const { G, a, b, c } = await deployed();
+    await G.connect(a).propose("t", ethers.id("post-exec"), "u");
+    await G.connect(a).vote(0, true);
+    await G.connect(b).vote(0, true);
+    await G.connect(a).execute(0);
+    await expect(G.connect(c).vote(0, true)).to.be.revertedWith("already executed");
+  });
+
+  it("exposes quorum as immutable view", async () => {
+    const { G } = await deployed();
+    expect(await G.quorum()).to.equal(2);
+  });
 });
