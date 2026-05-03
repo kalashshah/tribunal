@@ -35,6 +35,7 @@ web/var/
 
 # AI planning / spec artifacts
 docs/superpowers/
+.mcp.json
 
 # demo wallets and configs (contain private keys)
 demo/
