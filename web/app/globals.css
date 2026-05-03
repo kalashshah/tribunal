@@ -162,9 +162,12 @@ main { padding: 48px clamp(20px, 5vw, 56px); max-width: 1080px; margin: 0 auto; 
   justify-content: space-between;
   align-items: baseline;
   gap: 24px;
-  padding: 18px 4px;
-  font-family: var(--font-display), Georgia, serif;
-  font-size: 1.2rem;
+  padding: 20px 4px;
+  font-family: var(--font-body), system-ui, -apple-system, sans-serif;
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1.45;
   color: var(--ink);
   transition: color 120ms ease;
 }
@@ -305,13 +308,24 @@ form button[disabled] { opacity: 0.5; cursor: progress; }
   margin: 0;
   display: grid;
   gap: 20px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
+}
+@media (max-width: 900px) {
+  .steps { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .steps { grid-template-columns: 1fr; }
 }
 .steps li {
   background: var(--paper);
   border: 1px solid var(--line-soft);
   padding: 18px 18px 22px;
   border-radius: 4px;
+  min-width: 0;
+}
+.steps li code {
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .steps li .num {
   display: block;

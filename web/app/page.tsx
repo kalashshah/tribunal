@@ -26,14 +26,34 @@ export default function Home() {
       <Section
         eyebrow="The proceeding"
         title="From complaint to closure."
-        lede="A complete hearing in minutes. Filed by an agent, argued by counsel, ruled by a panel, settled on chain — with the record replayable by anyone forever."
+        lede="A complete hearing in minutes. Filed through MCP, argued over encrypted P2P, ruled by an iNFT panel inside a reproducible enclave, settled on 0G — every message replayable from chain data alone, forever."
       >
         <Steps
           items={[
-            { title: "File",       body: "State the parties, the substance of the disagreement, and any funds in dispute." },
-            { title: "Hearing",    body: "A panel is empanelled. Counsel for each side is heard in opening, rebuttal, and closing." },
-            { title: "Verdict",    body: "Each judge rules independently. Majority decides. Dissents are kept on the record." },
-            { title: "Settlement", body: "Funds release to the prevailing party. Both sides are notified. The case is closed." },
+            {
+              title: "File",
+              body: <>Either party — or its agent, via <code>tribunal_file_case</code> on the Tribunal MCP — lodges the accusation. <code>TribunalCore.fileCase</code> emits <code>CaseFiled</code> on 0G; any linked <code>TribunalEscrow</code> agreement is bound to the case.</>,
+            },
+            {
+              title: "Empanel",
+              body: <>The runner accepts the case and seats a panel of judge iNFTs (ERC-7857 on 0G). Parties, lawyers, clerk and judge are addressed by their <code>*.tribunal.eth</code> ENSIP-25 subnames and reach one another over Gensyn AXL — encrypted P2P, no broker.</>,
+            },
+            {
+              title: "Argue",
+              body: <>Each side's counsel agent interviews its client, then trades openings, cross-examination, rebuttal, and closings through the clerk. Every message is pinned to 0G Storage and its hash anchored on-chain via <code>TribunalCore.recordEvent</code>.</>,
+            },
+            {
+              title: "Deliberate",
+              body: <>The judge resolves cited articles from the ENS-anchored rulebook (<code>chapter-X-Y.rulebook.tribunal.eth</code>), then runs its inference inside the Gensyn REE enclave — returning the opinion alongside a deterministic execution receipt.</>,
+            },
+            {
+              title: "Rule",
+              body: <><code>VerdictLog.attachReceipt</code> anchors the REE receipt (hash + URL) and <code>TribunalCore.finalizeVerdict</code> records the majority ruling. The judge iNFT's append-only memory absorbs the case-ruling hash — its evolving precedent.</>,
+            },
+            {
+              title: "Settle",
+              body: <><code>EscrowAdapter.settleByTribunal</code> releases the funds to the prevailing party. The full transcript, every receipt, and the rulebook citations are replayable from chain data alone — forever.</>,
+            },
           ]}
         />
       </Section>
@@ -116,6 +136,110 @@ export default function Home() {
                     article it did not actually look up.
                   </p>
                 </>
+              ),
+            },
+            {
+              q: "What stops the judge from hallucinating a verdict?",
+              a: (
+                <>
+                  <p>
+                    Frontier LLMs are good enough to reason carefully over a
+                    bounded record (the contract, the evidence, the rulebook),
+                    but the residual risk of a hallucinated finding is real
+                    and we do not pretend otherwise. The answer is the same
+                    answer common law settled on centuries ago for the same
+                    problem in humans: a <strong>jury</strong>.
+                  </p>
+                  <p>
+                    A single human judge can be unfair, biased, racist, bored,
+                    or simply wrong on a given day, no different in kind from
+                    a model that occasionally drifts. The fix is not to find
+                    one perfect adjudicator. It is to require that{" "}
+                    <strong>multiple independent adjudicators converge</strong>
+                    on the same ruling before it binds. Tribunal panels work
+                    the same way: each judge iNFT runs its own REE inference
+                    on the same record, each produces its own receipt, and
+                    only a majority finalizes the verdict on{" "}
+                    <code>TribunalCore</code>. Dissents are recorded.
+                  </p>
+                  <p>
+                    On top of that, every step is verifiable. The judge's
+                    inference runs inside Gensyn REE, which emits a
+                    cryptographic receipt binding the model, inputs, and
+                    output; the receipt is anchored on-chain via{" "}
+                    <code>VerdictLog.attachReceipt</code>; anyone can re-run
+                    REE in verify mode and check the verdict text was
+                    actually produced by the claimed model on the claimed
+                    inputs. So the question is not "did the model hallucinate
+                    once," it is "did a quorum of independently-run judges
+                    each produce a receipt-backed ruling that agrees,"
+                    which is a much harder failure mode to hit by accident.
+                  </p>
+                </>
+              ),
+            },
+            {
+              q: "AI is non-deterministic. How do two verifiers reach the same answer?",
+              a: (
+                <p>
+                  That is precisely the property REE provides. It packages
+                  model export, compilation, inference, and output decoding
+                  into one containerised pipeline so identical inputs produce
+                  identical outputs across hardware. The receipt is what makes
+                  the run reproducible without requiring identical machines.
+                </p>
+              ),
+            },
+            {
+              q: "How do you know the agents on either side are who they claim to be?",
+              a: (
+                <p>
+                  Every agent (judge, clerk, lawyer, litigant) holds an
+                  ENSIP-25 subname under <code>tribunal.eth</code> with text
+                  records for role, AXL peer id, pubkey, and an ERC-7930 cross
+                  link to its entry in the 0G <code>AgentRegistry</code>. AXL
+                  traffic is signed with the key whose pubkey is published in
+                  ENS, so impersonation requires compromising both the name
+                  and the signing key.
+                </p>
+              ),
+            },
+            {
+              q: "What if a litigant submits fabricated evidence?",
+              a: (
+                <p>
+                  Tribunal rules on the contract terms and the evidence on the
+                  record, not on absolute ground truth. Every exhibit is
+                  content-addressed and pinned to 0G Storage, so the trail is
+                  immutable and reviewable after the fact. Submitting forged
+                  evidence is itself contractually actionable and permanently
+                  visible to any auditor of the case.
+                </p>
+              ),
+            },
+            {
+              q: "How is sensitive evidence kept private if everything is on 0G?",
+              a: (
+                <p>
+                  0G Storage is content-addressed, not mandatorily public.
+                  Sensitive material can be uploaded encrypted with keys held
+                  by the parties and the judge enclave; only the hash is
+                  anchored on-chain. The audit trail proves what was shown to
+                  the judge without leaking the contents to the world.
+                </p>
+              ),
+            },
+            {
+              q: "What stops malicious peers from spamming AXL or DoSing the clerk?",
+              a: (
+                <p>
+                  AXL peer ids are bound to ENS identities and to{" "}
+                  <code>AgentRegistry</code> membership on 0G, so traffic is
+                  attributable and gateable. The clerk only honors peers whose
+                  ENS records carry a verified-agent attestation pointing at
+                  the active registry entry, which means participation is
+                  gated by registry membership rather than raw network reach.
+                </p>
               ),
             },
             {
