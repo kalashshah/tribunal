@@ -125,7 +125,6 @@ export async function runDeliberateLoop(input: DeliberateInput): Promise<Deliber
     const out = await llm.complete({
       system: `${systemBase}\n\n${PROTOCOL}`,
       messages: conversation,
-      responseFormat: "json",
     });
     const parsed = parseStep(out.text);
 

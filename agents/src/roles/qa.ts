@@ -45,16 +45,22 @@ export async function askParty(
   const targetEns = target === "accuser" ? deps.partyEns.accuser : deps.partyEns.defendant;
   const targetAddr = target === "accuser" ? deps.partyAddress.accuser : deps.partyAddress.defendant;
 
-  // Anchor the question in the transcript regardless of mode.
+  const log = (m: string) => console.log(`[askParty c${deps.caseId} q=${questionId.slice(-8)} target=${target}] ${m}`);
+
+  log(`step1: axl.send question -> clerk`);
+  const t1 = Date.now();
   await deps.axl.send(deps.clerkPeerId, {
     kind: "question",
     from: deps.asker,
     body: question,
     meta: { questionId, target, askerSide: deps.askerSide, caseId: deps.caseId },
   });
+  log(`step1: done in ${Date.now()-t1}ms`);
 
   let answer: string;
   if (deps.mode === "human") {
+    log(`step2: postQuestion`);
+    const t2 = Date.now();
     await postQuestion(deps.backendUrl, {
       caseId: deps.caseId,
       questionId,
@@ -63,22 +69,30 @@ export async function askParty(
       targetAddress: targetAddr,
       body: question,
     });
+    log(`step2: done in ${Date.now()-t2}ms`);
+
+    log(`step3: pollAnswer (timeout ${deps.timeoutMs ?? 'default'}ms)`);
+    const t3 = Date.now();
     const polled = await pollAnswer(deps.backendUrl, deps.caseId, questionId, {
       intervalMs: deps.pollIntervalMs,
       timeoutMs: deps.timeoutMs,
     });
+    log(`step3: done in ${Date.now()-t3}ms (got=${polled ? 'answer' : 'null'})`);
     answer = polled ?? NO_RESPONSE(target, targetEns);
   } else {
     if (!partyAgent) throw new Error(`askParty: mode=auto requires a partyAgent for ${target}`);
     answer = await partyAgent.answer(question, transcriptSoFar);
   }
 
+  log(`step4: axl.send answer -> clerk`);
+  const t4 = Date.now();
   await deps.axl.send(deps.clerkPeerId, {
     kind: "answer",
     from: targetEns,
     body: answer,
     meta: { questionId, answeringSide: target, caseId: deps.caseId },
   });
+  log(`step4: done in ${Date.now()-t4}ms — askParty returning`);
   return answer;
 }
 

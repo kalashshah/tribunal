@@ -43,16 +43,32 @@ export async function pollAnswer(
   const timeout  = opts.timeoutMs ?? 5 * 60 * 1000;
   const deadline = Date.now() + timeout;
   const url = `${backendUrl}/api/cases/${encodeURIComponent(caseId)}/questions/${encodeURIComponent(questionId)}/answer`;
+  let iter = 0;
+  const tagBase = `[pollAnswer c${caseId} q=${questionId.slice(-8)}]`;
   while (Date.now() < deadline) {
+    iter++;
+    const ctrl = new AbortController();
+    const fetchTimeout = setTimeout(() => { console.log(`${tagBase} iter=${iter} ABORTING (10s)`); ctrl.abort(); }, 10_000);
+    const t0 = Date.now();
     try {
-      const res = await fetch(url);
-      if (res.ok) {
+      const res = await fetch(url, { signal: ctrl.signal });
+      const t1 = Date.now();
+      if (!res.ok) {
+        console.log(`${tagBase} iter=${iter} fetch=${t1-t0}ms status=${res.status} (skip)`);
+      } else {
         const j = (await res.json()) as { question?: { status: string; answer?: string } };
+        const t2 = Date.now();
+        const st = j.question?.status ?? "?";
+        console.log(`${tagBase} iter=${iter} fetch=${t1-t0}ms json=${t2-t1}ms status=${st}`);
         if (j.question?.status === "answered" && typeof j.question.answer === "string") {
           return j.question.answer;
         }
       }
-    } catch { /* keep polling */ }
+    } catch (e) {
+      console.log(`${tagBase} iter=${iter} ERROR after ${Date.now()-t0}ms: ${(e as Error).message?.slice(0,120)}`);
+    } finally {
+      clearTimeout(fetchTimeout);
+    }
     await new Promise((r) => setTimeout(r, interval));
   }
   return null;

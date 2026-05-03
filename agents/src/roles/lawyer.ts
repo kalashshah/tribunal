@@ -109,8 +109,12 @@ export function createLawyer(a: LawyerArgs): Lawyer {
     let prompt = `${initial}${protocol}\nYou may ask up to ${maxAsks} question${maxAsks === 1 ? "" : "s"} this phase.`;
     let asked = 0;
 
+    const llog = (m: string) => console.log(`[lawyer ${a.side} c${a.caseId} ${finalKind}] ${m}`);
     for (let step = 0; step < maxAsks + 2; step++) {
+      llog(`loop step=${step} -> think()`);
+      const tt = Date.now();
       const raw = await think(prompt, true);
+      llog(`think returned in ${Date.now()-tt}ms (len=${raw.length})`);
       const act = tryParseJsonObject<Action>(raw);
 
       if (!act) {
