@@ -142,6 +142,8 @@ demo:       5/5   (end-to-end on local hardhat)
 
 ## Built on
 
-- [0G Labs](https://0g.ai) — ERC-7857 iNFT primitive, 0G Chain, 0G Storage.
-- [Gensyn](https://gensyn.ai) — AXL P2P transport, REE reproducible inference.
-- [ENS](https://ens.domains) — ENSIP-25 verifiable agent identity, rulebook anchors.
+Per-sponsor deep dives on what we shipped and how we use each piece of infrastructure:
+
+- [0G Labs](https://0g.ai) — ERC-7857 iNFT primitive, 0G Chain, 0G Storage. → [`docs/integrations/0g.md`](docs/integrations/0g.md)
+- [Gensyn](https://gensyn.ai) — AXL P2P transport, REE reproducible inference. → [`docs/integrations/gensyn.md`](docs/integrations/gensyn.md)
+- [ENS](https://ens.domains) — ENSIP-25 verifiable agent identity, rulebook anchors. → [`docs/integrations/ens.md`](docs/integrations/ens.md)
