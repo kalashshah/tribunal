@@ -361,10 +361,12 @@ async function main() {
     if (inFlight.has(key)) return;
     inFlight.add(key);
 
+    let stopSubscribe: (() => void) | null = null;
     try {
       const status: bigint = await tribunalCore.caseStatus(caseId);
       // CaseStatus enum: None=0, Filed=1, Accepted=2, Arguments=3, Deliberation=4, Ruled=5, Settled=6
       if (status === 6n) { console.log(`Case ${key} already settled, skipping`); return; }
+      if (status >= 2n)  { console.log(`Case ${key} already past Filed (status=${status}), skipping`); return; }
 
       console.log(`\n=========== Case ${key} (status=${status}) ===========`);
 
@@ -403,7 +405,7 @@ async function main() {
           fs.appendFileSync(eventMetaPath, JSON.stringify({ seq, ...info }) + "\n");
         },
       });
-      const stopSubscribe = subscribe(clerkAxl, async (env) => {
+      stopSubscribe = subscribe(clerkAxl, async (env) => {
         const meta = (env.payload as any)?.meta;
         if (meta && String(meta.caseId) !== key) return; // ignore other cases
         await clerk.handleIncoming(env);
@@ -574,8 +576,7 @@ async function main() {
       // can poke it — so this is just a convenience.
       if (addr.TribunalEscrow) {
         try {
-          const escAdapter = (await tribunalCore.caseEscrowAdapter(caseId)) as string;
-          const escId      = (await tribunalCore.caseEscrowId(caseId))      as bigint;
+          const [escAdapter, escId] = (await tribunalCore.caseEscrow(caseId)) as [string, bigint];
           if (escAdapter && escAdapter.toLowerCase() === addr.TribunalEscrow.toLowerCase() && escId !== 0n) {
             const escAbi = ["function settleByTribunal(uint256 agreementId, uint256 caseId)"];
             const escContract = new ethers.Contract(addr.TribunalEscrow, escAbi, operator);
@@ -588,10 +589,10 @@ async function main() {
         }
       }
 
-      stopSubscribe();
     } catch (e) {
       console.error(`Case ${key} failed:`, e);
     } finally {
+      try { stopSubscribe?.(); } catch {}
       inFlight.delete(key);
     }
   }
