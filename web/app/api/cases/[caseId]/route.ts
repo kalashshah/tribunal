@@ -5,6 +5,8 @@ import * as path from "node:path";
 import * as dotenv from "dotenv";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
 
 const ABI = [

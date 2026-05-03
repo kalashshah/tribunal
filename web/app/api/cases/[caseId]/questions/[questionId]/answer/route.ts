@@ -4,6 +4,8 @@ import { verifyTribunalAuth } from "../../../../../../../lib/siwe";
 import { recordAnswer, getQuestion } from "../../../../../../../lib/case-store";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const VAR_DIR = path.resolve(process.cwd(), "var");
 

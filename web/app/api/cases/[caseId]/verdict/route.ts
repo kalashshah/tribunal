@@ -4,6 +4,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const abi = [
   "function verdicts(uint256) view returns (bool exists, bool prevailingIsAccuser, bytes32 opinionRoot, uint64 postedAt)",

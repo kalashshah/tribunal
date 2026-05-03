@@ -6,6 +6,8 @@ import * as dotenv from "dotenv";
 import { listQuestions } from "../../../../lib/case-store";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
 
 const VAR_DIR = path.resolve(process.cwd(), "var");

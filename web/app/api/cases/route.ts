@@ -10,6 +10,8 @@ import { createEnsResolver } from "../../../lib/ens-resolver";
 import { makeSepoliaAdapter } from "../../../lib/ens-sepolia";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
 
 interface ContractAddresses {

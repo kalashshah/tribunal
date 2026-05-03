@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 interface MetaRow { seq: number; rootHash?: string; storageTxHash?: string; storageTxSeq?: number; anchorTxHash?: string; error?: string }
 
