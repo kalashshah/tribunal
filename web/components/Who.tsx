@@ -1,6 +1,6 @@
 "use client";
 import { ExplorerLink } from "./ExplorerLink";
-import { DEPLOYMENT, ensApp, shortAddr } from "../lib/explorer";
+import { DEPLOYMENT, ensApp, ogAddr, shortAddr } from "../lib/explorer";
 import { useEnsName } from "./useEnsName";
 
 const ADDR_RE = /^0x[a-fA-F0-9]{40}$/;
@@ -15,18 +15,18 @@ export function Who({ from }: { from: string }) {
   const { name: resolved } = useEnsName(isAddr ? from : undefined);
 
   if (!isAddr) {
+    // No underlying 0G address available — fall back to the ENS app for
+    // tribunal-eth subnames (so users can still inspect the name on Sepolia).
     if (looksLikeTribunalEns(from)) {
       return <ExplorerLink href={ensApp(from)}>{from}</ExplorerLink>;
     }
     return <span>{from}</span>;
   }
 
-  if (resolved && looksLikeTribunalEns(resolved)) {
-    return (
-      <ExplorerLink href={ensApp(resolved)} title={from}>
-        {resolved}
-      </ExplorerLink>
-    );
-  }
-  return <span title={from}>{shortAddr(from)}</span>;
+  const label = resolved && looksLikeTribunalEns(resolved) ? resolved : shortAddr(from);
+  return (
+    <ExplorerLink href={ogAddr(from)} title={from}>
+      {label}
+    </ExplorerLink>
+  );
 }

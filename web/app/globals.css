@@ -72,8 +72,7 @@ p { line-height: 1.6; color: var(--ink-soft); margin: 0 0 1em; }
   backdrop-filter: blur(4px);
   position: sticky; top: 0; z-index: 10;
 }
-.header .brand { display: inline-flex; align-items: baseline; gap: 10px; color: var(--ink); }
-.header .brand-mark { font-size: 22px; transform: translateY(2px); color: var(--terracotta-deep); }
+.header .brand { display: inline-flex; align-items: center; color: var(--ink); }
 .header .brand-name {
   font-family: var(--font-display);
   font-size: 26px;

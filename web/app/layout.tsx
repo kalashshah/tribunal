@@ -29,12 +29,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <header className="header">
           <a href="/" className="brand">
-            <span className="brand-mark">⚖</span>
             <span className="brand-name">Tribunal</span>
           </a>
           <nav>
             <a href="/judges">Judges</a>
             <a href="/rulebook">Rulebook</a>
+            <a href="/escrow">Escrow</a>
             <a href="/governance">Governance</a>
           </nav>
         </header>
